@@ -7,7 +7,7 @@ GO
 RECONFIGURE;
 GO
 
-USE [FITS_UPS_DB]
+USE [FitsExpress_DispatchMgmtDB]
 
 DECLARE @outPutPath varchar(500) = 'C:\Extract_BLOB' --set this value. path to export the blob files
 IF NOT EXISTS(SELECT * FROM sysobjects WHERE name='__MigrationProofOfDelivery' AND xtype='U')
@@ -19,10 +19,10 @@ IF NOT EXISTS(SELECT * FROM sysobjects WHERE name='__MigrationProofOfDelivery' A
 
 declare @recordTable table(RowNumber int,CourDeliveryId bigint,DocNum varchar(100))
 INSERT INTO @recordTable(RowNumber,CourDeliveryId,DocNum)
-SELECT ROW_NUMBER() OVER (ORDER BY CI.COURIER_ID ASC) as RowNumber,CI.COURIER_ID,FORMAT(CI.CREATED_DATE,'yyyy-MM') DocNum
-FROM dbo.CDELIVERY_INFO CI LEFT JOIN dbo.__MigrationProofOfDelivery MDHB
-ON CI.COURIER_ID=MDHB.CourDeliveryId
-WHERE MDHB.CourDeliveryId IS NULL AND CI.[STATUS]='DE'  --Where not already migrated and delivered records only
+SELECT ROW_NUMBER() OVER (ORDER BY CI.CourDeliveryId ASC) as RowNumber,CI.CourDeliveryId,FORMAT(CI.CreatedDate,'yyyy-MM') DocNum
+FROM dbo.[ShipmentDeliveryCourier] CI LEFT JOIN dbo.__MigrationProofOfDelivery MDHB
+ON CI.CourDeliveryId=MDHB.CourDeliveryId
+WHERE MDHB.CourDeliveryId IS NULL AND CI.RecStatus='DE'  --Where not already migrated and delivered records only
 
 --- BEGIN Folder Creation Process
 declare @folderTable table(id int identity(1,1),folderName varchar(100))
@@ -52,10 +52,10 @@ DECLARE @i bigint, @init int, @data varbinary(max), @fPath varchar(max)
 WHILE(@iterationCnt < @datasetSize)
 BEGIN
 	INSERT INTO @Doctable([id],CourDeliveryId,[Doc_Num],[FileName],[Doc_Content])
-	SELECT Row_Number() OVER (Order By CI.COURIER_ID ASC), CI.COURIER_ID,RT.DocNum,CONCAT(NEWID(),'.jpg'),
-	CAST(N'' AS xml).value('xs:base64Binary(sql:column("SIGNATURE"))','varbinary(max)') --convert base64 to BLOB
-	FROM dbo.CDELIVERY_INFO CI INNER JOIN @recordTable RT
-	ON CI.COURIER_ID=RT.CourDeliveryId
+	SELECT Row_Number() OVER (Order By CI.CourDeliveryId ASC), CI.CourDeliveryId,RT.DocNum,CONCAT(NEWID(),'.jpg'),
+	CAST(N'' AS xml).value('xs:base64Binary(sql:column("Signature"))','varbinary(max)') --convert base64 to BLOB
+	FROM dbo.[ShipmentDeliveryCourier] CI INNER JOIN @recordTable RT
+	ON CI.CourDeliveryId=RT.CourDeliveryId
 	WHERE RT.RowNumber BETWEEN @startIndex AND @endingIndex
 	
 	SELECT @i = COUNT(1) FROM @Doctable
@@ -91,3 +91,9 @@ BEGIN
 	INSERT INTO __MigrationProofOfDelivery(CourDeliveryId,DocumentName) SELECT CourDeliveryId,[FileName] FROM @Doctable
 	DELETE FROM @Doctable
 END
+
+-- Update Base64 Signature field with related fileName
+UPDATE SDC SET [Signature]=MPD.DocumentName
+FROM [FitsExpress_DispatchMgmtDB].[dbo].[ShipmentDeliveryCourier] SDC
+INNER JOIN dbo.__MigrationProofofDelivery MPD
+ON SDC.CourDeliveryId=MPD.CourDeliveryId
