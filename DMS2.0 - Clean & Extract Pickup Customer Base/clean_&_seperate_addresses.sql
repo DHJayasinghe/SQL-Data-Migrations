@@ -36,8 +36,12 @@ SELECT
 	CustomerName,
 	Original_Address,
 	REPLACE(REPLACE(CASE 
-		WHEN PATINDEX('%COL %',Cleared_Address)>0 THEN STUFF(Cleared_Address,PATINDEX('%COL %',Cleared_Address),3,'COLOMBO')
-		WHEN PATINDEX('%CO %',Cleared_Address)>0 THEN STUFF(Cleared_Address,PATINDEX('%CO %',Cleared_Address),3,'COLOMBO')
+		WHEN PATINDEX('% COL %',Cleared_Address)>0 THEN STUFF(Cleared_Address,PATINDEX('% COL %',Cleared_Address),4,' COLOMBO') --ex: COL 03
+		WHEN PATINDEX('% CO %',Cleared_Address)>0 THEN STUFF(Cleared_Address,PATINDEX('% CO %',Cleared_Address),3,' COLOMBO') --ex: CO 03
+		WHEN PATINDEX('% COL-%',Cleared_Address)>0 THEN STUFF(Cleared_Address,PATINDEX('% COL-%',Cleared_Address),5,' COLOMBO ') --ex: COL-3
+		WHEN PATINDEX('% COLOMBO-%',Cleared_Address)>0 THEN STUFF(Cleared_Address,PATINDEX('% COLOMBO-%',Cleared_Address),9,' COLOMBO ') --ex: COLOMBO-11
+		WHEN PATINDEX('% COLOMB %',Cleared_Address)>0 THEN STUFF(Cleared_Address,PATINDEX('% COLOMB %',Cleared_Address),7,' COLOMBO ') --ex: COLOMB 11
+		WHEN PATINDEX('% NO-[0-9]%',Cleared_Address)>0 THEN STUFF(Cleared_Address,PATINDEX('% NO-[0-9]%',Cleared_Address),4,' NO ') --ex: NO-479
 		ELSE Cleared_Address END,'–',''),'"','')  Cleared_Address, --replace COL like keywords with COLOMBO
 	City,
 	Contacts
@@ -88,7 +92,6 @@ SELECT
 	Contacts
 INTO #tmpPickupAddresses4
 FROM STEP1
---WHERE LEN(Filtered_Contact)>0
 DROP TABLE #tmpPickupAddresses3
 
 ;WITH STEP3 AS
@@ -109,8 +112,6 @@ SELECT
 	CustomerName,
 	Original_Address,
 	IIF(SUBSTRING(REVERSE(Cleared_Address),1,1)='.',SUBSTRING(Cleared_Address,1,LEN(Cleared_Address)-1),Cleared_Address) Cleared_Address, --remove trailing dot if exists
-	--IIF(PATINDEX('% 00[0-9]',Cleared_Address)>0,STUFF(Cleared_Address,PATINDEX('% 00[0-9]',Cleared_Address)+1,1,''), --correct COLOMBO 002 like words to COLOMBO 02
-	--IIF(PATINDEX('% 0[0-9]0',Cleared_Address)>0,STUFF(Cleared_Address,PATINDEX('% 0[0-9]0',Cleared_Address)+1,1,''),Cleared_Address)) Cleared_Address, --correct COLOMBO 010 like words to COLOMBO 10
 	IIF(PATINDEX('%[0-9] [0-9]%',IIF(PATINDEX('%[0-9] [0-9]%',Cleared_Contact)>0,STUFF(Cleared_Contact,PATINDEX('%[0-9] [0-9]%',Cleared_Contact)+1,1,''),Cleared_Contact))>0, --step2 of clear phone numberes with spaces
 		STUFF(IIF(PATINDEX('%[0-9] [0-9]%',Cleared_Contact)>0,STUFF(Cleared_Contact,PATINDEX('%[0-9] [0-9]%',Cleared_Contact)+1,1,''),Cleared_Contact),PATINDEX('%[0-9] [0-9]%',IIF(PATINDEX('%[0-9] [0-9]%',Cleared_Contact)>0,STUFF(Cleared_Contact,PATINDEX('%[0-9] [0-9]%',Cleared_Contact)+1,1,''),Cleared_Contact))+1,1,''),
 		IIF(PATINDEX('%[0-9] [0-9]%',Cleared_Contact)>0,STUFF(Cleared_Contact,PATINDEX('%[0-9] [0-9]%',Cleared_Contact)+1,1,''),Cleared_Contact)) Cleared_Contact, --step1 of clear phone numberes with spaces
@@ -158,7 +159,7 @@ SELECT
 	Contacts
 INTO #tmpPickupAddresses6
 FROM STEP4 T2
-DROP TABLE #tmpPickupAddresses5 --release memory
+DROP TABLE #tmpPickupAddresses5
 
 ;WITH STEP5 AS 
 (SELECT 
@@ -229,7 +230,6 @@ SELECT
 	Contacts
 INTO #tblClearedCityAddresses -- matching city pickup addresses
 FROM STEP5_2
-
 
 
 -- #######################################################
@@ -368,7 +368,7 @@ DROP TABLE #tblNoMatchCityAddresses
 DROP TABLE #tmpPickupAddresses7
 
 -- ######################################################
--- Clear Customer Name (if exists) from begining of the address field
+-- clear Customer Name (if exists) at the begining of the address field
 SELECT 
 	PickupId,
 	CustomerId,
@@ -389,14 +389,14 @@ INTO #tmpPickupAddresses9
 FROM #tmpPickupAddresses8
 DROP TABLE #tmpPickupAddresses8
 
---seperate cleared address field into prefixes, so can seperate building and street later
+--seperate cleared_address field into prefixes, so can search for building terms
 ;WITH STEP8_1 AS
 (SELECT 
 	PickupId,
 	CustomerId,
 	CustomerName,
 	Original_Address,
-	(SELECT STRING_AGG(TRIM([value]),', ') FROM STRING_SPLIT(Cleared_Address,',') WHERE TRIM([value])!='') Cleared_Address, --remove trailing and leading commas
+	(SELECT STRING_AGG(TRIM([value]),', ') FROM STRING_SPLIT(CONCAT(Cleared_Address,' ',Seperated_Addr_Prefix),',') WHERE TRIM([value])!='') Cleared_Address, --remove trailing and leading commas
 	Seperated_Addr_Prefix, 
 	Cleared_Addr_Contact,
 	Original_City,
@@ -410,7 +410,7 @@ STEP8_2 AS
 	CustomerId,
 	CustomerName,
 	Original_Address,
-	Cleared_Address,
+	(SELECT STRING_AGG(TRIM([value]),' ') FROM STRING_SPLIT(Cleared_Address,' ') WHERE TRIM([value])!='') Cleared_Address, --remove extra spaces
 	REVERSE(SUBSTRING(REVERSE(Cleared_Address),1,CHARINDEX(',',REVERSE(Cleared_Address)))) Street, --Step4 - seperate comma seperated last set of words as street Street
 	--TRIM(REPLACE(Cleared_Address,Street,'')) Cleared_Address,
 	Seperated_Addr_Prefix, 
@@ -426,7 +426,8 @@ STEP8_3 AS
 	CustomerId,
 	CustomerName,
 	Original_Address,
-	TRIM(REPLACE(Cleared_Address,Street,'')) Cleared_Address,
+	Cleared_Address,
+	--TRIM(REPLACE(Cleared_Address,Street,'')) Cleared_Address,
 	(SELECT STRING_AGG(TRIM([value]),', ') FROM STRING_SPLIT(Street,',') WHERE TRIM([value])!='') Street, --Step4 - seperate comma seperated last set of words as street Street
 	Seperated_Addr_Prefix, 
 	Cleared_Addr_Contact,
@@ -442,6 +443,7 @@ SELECT
 	CustomerName,
 	Original_Address,
 	Cleared_Address,
+	--Cleared_Address,
 	TRIM(IIF(CHARINDEX(' ', Cleared_Address)>0,SUBSTRING(Cleared_Address,1,CHARINDEX(' ', Cleared_Address)),Cleared_Address)) Prefix1, -- seperate remain address field by spaces
 	TRIM(IIF(CHARINDEX(' ', Cleared_Address)>0,STUFF(Cleared_Address,1,CHARINDEX(' ', Cleared_Address),''),NULL)) Prefix2,
 	--TRIM(SUBSTRING(Cleared_Address,CHARINDEX(' ', Cleared_Address),LEN(Cleared_Address)+1)) Prefix2,
@@ -520,12 +522,18 @@ SELECT
 	CustomerName,
 	Original_Address,
 	Cleared_Address,
-	(SELECT STRING_AGG([value],', ') FROM STRING_SPLIT(Prefix1,',') WHERE TRIM([value])!='') Prefix1,
-	(SELECT STRING_AGG([value],', ') FROM STRING_SPLIT(Prefix2,',') WHERE TRIM([value])!='') Prefix2,
-	(SELECT STRING_AGG([value],', ') FROM STRING_SPLIT(Prefix3,',') WHERE TRIM([value])!='') Prefix3,
-	(SELECT STRING_AGG([value],', ') FROM STRING_SPLIT(Prefix4,',') WHERE TRIM([value])!='') Prefix4,
-	(SELECT STRING_AGG([value],', ') FROM STRING_SPLIT(TRIM(IIF(CHARINDEX(' ', Prefix5)>0,SUBSTRING(Prefix5,1,CHARINDEX(' ', Prefix5)),Prefix5)),',') WHERE TRIM([value])!='') Prefix5,
-	(SELECT STRING_AGG([value],', ') FROM STRING_SPLIT(TRIM(IIF(CHARINDEX(' ', Prefix5)>0,STUFF(Prefix5,1,CHARINDEX(' ', Prefix5),''),NULL)),',') WHERE TRIM([value])!='') Prefix6,
+	Prefix1,
+	Prefix2,
+	Prefix3,
+	Prefix4,
+	--(SELECT STRING_AGG([value],', ') FROM STRING_SPLIT(Prefix1,',') WHERE TRIM([value])!='') Prefix1, --remove leading and trailing commas (if exists)
+	--(SELECT STRING_AGG([value],', ') FROM STRING_SPLIT(Prefix2,',') WHERE TRIM([value])!='') Prefix2, --remove leading and trailing commas (if exists)
+	--(SELECT STRING_AGG([value],', ') FROM STRING_SPLIT(Prefix3,',') WHERE TRIM([value])!='') Prefix3, --remove leading and trailing commas (if exists)
+	--(SELECT STRING_AGG([value],', ') FROM STRING_SPLIT(Prefix4,',') WHERE TRIM([value])!='') Prefix4, --remove leading and trailing commas (if exists)
+	--(SELECT STRING_AGG([value],', ') FROM STRING_SPLIT(TRIM(IIF(CHARINDEX(' ', Prefix5)>0,SUBSTRING(Prefix5,1,CHARINDEX(' ', Prefix5)),Prefix5)),',') WHERE TRIM([value])!='') Prefix5,
+	--(SELECT STRING_AGG([value],', ') FROM STRING_SPLIT(TRIM(IIF(CHARINDEX(' ', Prefix5)>0,STUFF(Prefix5,1,CHARINDEX(' ', Prefix5),''),NULL)),',') WHERE TRIM([value])!='') Prefix6,
+	TRIM(IIF(CHARINDEX(' ', Prefix5)>0,SUBSTRING(Prefix5,1,CHARINDEX(' ', Prefix5)),Prefix5)) Prefix5,
+	TRIM(IIF(CHARINDEX(' ', Prefix5)>0,STUFF(Prefix5,1,CHARINDEX(' ', Prefix5),''),NULL)) Prefix6,
 	Street, 
 	HasStreet,
 	Seperated_Addr_Prefix, 
@@ -538,14 +546,28 @@ INTO #tmpPickupAddresses10
 FROM STEP8_7
 DROP TABLE #tmpPickupAddresses9
 
+--SELECT * FROM #tmpPickupAddresses10
+--WHERE PickupId IN (10029,10038,10042,10029)
 
-;WITH STEP9_1 AS
+--Prefix match on 1 and 2 prefix columns
+;WITH STEP9 AS(
+SELECT *,
+	'' AS Building,
+	'' AS ToConcat,
+	Prefix1 AS ToMatch1,
+	Prefix2 AS ToMatch2
+FROM #tmpPickupAddresses10)
+,STEP9_1 AS
 (SELECT 
 	PickupId,
 	CustomerId,
 	CustomerName,
 	Original_Address,
 	Cleared_Address,
+	Building,
+	ToConcat,
+	ToMatch1,
+	ToMatch2,
 	Prefix1, 
 	Prefix2,
 	Prefix3,
@@ -553,28 +575,33 @@ DROP TABLE #tmpPickupAddresses9
 	Prefix5,
 	Prefix6,
 	--compare prefix1 column and prefix2 column
-	IIF(PATINDEX('%[0-9]%',Prefix2)>0 OR PATINDEX('F%R',Prefix2)>0 OR PATINDEX('%HOUSE%',Prefix2)>0 OR PATINDEX('CENT%',Prefix2)>0 OR PATINDEX('SECOND%',Prefix2)>0 OR PATINDEX('B%G',Prefix2)>0 OR PATINDEX('DEP%',Prefix2)>0,12, --like 3 1/1 | 4TH FLOOR | BLOCK 12 | MARITIME CENTER => 12
-		IIF(PATINDEX('NO%',Prefix1)>0 OR PATINDEX('LEVEL%',Prefix1)>0 OR PATINDEX('%[0-9]%',Prefix1)>0  OR PATINDEX('BLOCK%',Prefix1)>0,1,0)) Pref12Match, -- if prefix2 is empty and prefix1 is contain numbers => 1, else => 0
+	IIF(
+		((PATINDEX('[#/]',ToMatch1)>0 OR PATINDEX('NO%',ToMatch1)>0 OR CHARINDEX('LEVEL',ToMatch1)>0 OR PATINDEX('%[0-9]%',ToMatch1)>0 OR CHARINDEX('BLOCK',ToMatch1)>0 OR CHARINDEX('LOT',ToMatch1)>0 OR PATINDEX('APART%NT',ToMatch1)>0 OR LEN(TRIM(ISNULL(ToMatch1,'')))=0) AND ((PATINDEX('%[0-9]%[^HD]',ToMatch2)>0 OR PATINDEX('[0-9]',ToMatch2)>0 OR PATINDEX('%[0-9]%[0-9,]',ToMatch2)>0) AND LEN(ISNULL(ToMatch2,'')) BETWEEN 0 AND 7)) --like "# 5" | "NO 5/2" | "LEVEL 4" | "3 1/1" | "LOT 4" | "BLOCK 12" | APARTMENT 602  AND Prefix2 is not a Tel# (max len=5) 
+		OR (PATINDEX('%[0-9]%',ToMatch1)>0 AND (PATINDEX('%FL[OR]%',ToMatch2)>0 OR CHARINDEX('POST',ToMatch2)>0)) --like "7th FLOOR" | "07A POST"
+		OR (PATINDEX('PO%',ToMatch1)>0 AND PATINDEX('BOX%',ToMatch2)>0),12,--like PO BOX
+			IIF(PATINDEX('%[0-9]%',ToMatch1)>0,1,0)) PrefixMatch, 
 	Street, 
 	HasStreet,
-	Seperated_Addr_Prefix, 
+	Seperated_Addr_Prefix,
 	Cleared_Addr_Contact,
 	Original_City,
 	Cleared_City,
 	CityMatchIndex,
 	Contacts
-FROM #tmpPickupAddresses10)
-,STEP9_2 AS(
+FROM STEP9)
 SELECT 
 	PickupId,
 	CustomerId,
 	CustomerName,
 	Original_Address,
 	Cleared_Address,
+	TRIM(CONCAT(Building,' ',CASE PrefixMatch WHEN 12 THEN TRIM(CONCAT(ToMatch1,' ',ToMatch2)) WHEN 1 THEN ToMatch1 ELSE NULL END)) Building,
+	TRIM(CONCAT(ISNULL(ToConcat,''),' ',ISNULL(CASE WHEN PrefixMatch IN (12,1) THEN NULL ELSE ToMatch1 END,''))) ToConcat, --building terms removed from prefix1 field and concat with cleared Prefix2
+	TRIM(CASE PrefixMatch WHEN 12 THEN NULL ELSE ToMatch2 END) ToMatch1, --building terms removed from prefix2 field
+	Prefix3 ToMatch2,
 	--Prefix1, 
-	TRIM(CASE Pref12Match WHEN 12 THEN CONCAT(Prefix1,' ',Prefix2)  WHEN 1 THEN Prefix1 ELSE NULL END) Building, --prefix1 converted to building field
-	TRIM(CASE Pref12Match WHEN 12 THEN NULL WHEN 1 THEN Prefix2 ELSE CONCAT(Prefix1,' ',Prefix2) END) Prefix2, --building terms removed from prefix2 field
-	Prefix3,
+	--Prefix2,
+	--Prefix3,
 	Prefix4,
 	Prefix5,
 	Prefix6,
@@ -586,24 +613,35 @@ SELECT
 	Cleared_City,
 	CityMatchIndex,
 	Contacts
-FROM STEP9_1)
-,STEP9_3 AS(
+INTO #PrefixMatch_1_2
+FROM STEP9_1
+DROP TABLE #tmpPickupAddresses10
+--SELECT * FROM #PrefixMatch_1_2 WHERE PickupId IN (11928)
+
+--Prefix match on 2 and 3 prefix columns
+;WITH STEP9_3 AS(
 SELECT 
 	PickupId,
 	CustomerId,
 	CustomerName,
 	Original_Address,
 	Cleared_Address,
-	--Prefix1, 
 	Building,
-	Prefix2,
-	Prefix3,
+	ToConcat,
+	ToMatch1,
+	ToMatch2,
+	--Prefix1, 
+	--Prefix2,
+	--Prefix3,
 	Prefix4,
 	Prefix5,
 	Prefix6,
 	--compare prefix2 column and prefix3 column
-	IIF(PATINDEX('%[0-9]%',Prefix3)>0 OR PATINDEX('F%R',Prefix3)>0 OR PATINDEX('%HOUSE%',Prefix3)>0 OR PATINDEX('CENT%',Prefix3)>0 OR PATINDEX('SECOND%',Prefix3)>0 OR PATINDEX('B%G',Prefix3)>0 OR PATINDEX('DEP%',Prefix3)>0,12, --like 3 1/1 | 4TH FLOOR | BLOCK 12 | MARITIME CENTER => 12
-		IIF(LEN(ISNULL(Prefix2,''))=0 OR PATINDEX('NO%',Prefix2)>0 OR PATINDEX('LEVEL%',Prefix2)>0 OR PATINDEX('%[0-9]%',Prefix2)>0 OR PATINDEX('BLOCK%',Prefix2)>0 OR  PATINDEX('APART%T',Prefix2)>0,1,0)) Pref23Match, -- if prefix3 is empty and prefix2 is contain numbers => 1, else => 0
+	IIF(
+		((PATINDEX('[#/]',ToMatch1)>0 OR PATINDEX('NO%',ToMatch1)>0 OR CHARINDEX('LEVEL',ToMatch1)>0 OR PATINDEX('%[0-9]%',ToMatch1)>0 OR CHARINDEX('BLOCK',ToMatch1)>0 OR CHARINDEX('LOT',ToMatch1)>0 OR PATINDEX('APART%NT',ToMatch1)>0 OR LEN(TRIM(ISNULL(ToMatch1,'')))=0) AND ((PATINDEX('%[0-9]%[^HD]',ToMatch2)>0 OR PATINDEX('[0-9]',ToMatch2)>0 OR PATINDEX('%[0-9]%[0-9,]',ToMatch2)>0) AND LEN(ISNULL(ToMatch2,'')) BETWEEN 0 AND 7)) --like "NO 5/2" | "LEVEL 4" | "3 1/1" | "LOT 4" | "BLOCK 12" | "12" AND Prefix2 is not like 9TH or 2ND (Floor prefixes) and a Tel# (max len=5) 
+		OR (PATINDEX('%[0-9]%',ToMatch1)>0 AND (PATINDEX('%FL[OR]%',ToMatch2)>0 OR CHARINDEX('POST',ToMatch2)>0)) --like "7th FLOOR" | "07A POST"
+		OR (PATINDEX('PO%',ToMatch1)>0 AND PATINDEX('BOX%',ToMatch2)>0),12,--like PO BOX
+			IIF((PATINDEX('%[0-9]%[^HDL]',ToMatch1)>0 OR PATINDEX('%[0-9]%[0-9,]',ToMatch1)>0 OR PATINDEX('%[0-9]/%',ToMatch1)>0) AND LEN(REPLACE(ToMatch1,',','')) BETWEEN 3 AND 6,1,0)) PrefixMatch,
 	Street, 
 	HasStreet,
 	Seperated_Addr_Prefix, 
@@ -612,68 +650,21 @@ SELECT
 	Cleared_City,
 	CityMatchIndex,
 	Contacts
-FROM STEP9_2)
-,STEP9_4 AS(
+FROM #PrefixMatch_1_2)
+--,STEP9_4 AS(
 SELECT 
 	PickupId,
 	CustomerId,
 	CustomerName,
 	Original_Address,
 	Cleared_Address,
-	TRIM(CONCAT(Building,' ',CASE Pref23Match WHEN 12 THEN CONCAT(Prefix2,' ',Prefix3) WHEN 1 THEN Prefix2 ELSE NULL END)) Building,
-	--Prefix3,
-	TRIM(CASE Pref23Match WHEN 0 THEN Prefix2 ELSE NULL END) Prefix2, --building terms removed from prefix2 field
-	TRIM(CASE Pref23Match WHEN 12 THEN NULL ELSE Prefix3 END) Prefix3, --building terms removed from prefix3 field
-	Prefix4,
-	Prefix5,
-	Prefix6,
-	Street, 
-	HasStreet,
-	Seperated_Addr_Prefix, 
-	Cleared_Addr_Contact,
-	Original_City,
-	Cleared_City,
-	CityMatchIndex,
-	Contacts
-FROM STEP9_3)
-,STEP9_5 AS(
-SELECT 
-	PickupId,
-	CustomerId,
-	CustomerName,
-	Original_Address,
-	Cleared_Address,
+	TRIM(CONCAT(Building,' ',CASE PrefixMatch WHEN 12 THEN TRIM(CONCAT(ToMatch1,' ',ToMatch2)) WHEN 1 THEN ToMatch1 ELSE NULL END)) Building,
+	TRIM(CONCAT(ISNULL(ToConcat,''),' ',ISNULL(CASE WHEN PrefixMatch IN (12,1) THEN NULL ELSE ToMatch1 END,''))) ToConcat, --building terms removed from prefix2 field and concat with cleared Prefix2
+	TRIM(CASE PrefixMatch WHEN 12 THEN NULL ELSE ToMatch2 END) ToMatch1, --building terms removed from prefix3 field
+	Prefix4 ToMatch2,
 	--Prefix1, 
-	Building,
-	Prefix2,
-	Prefix3,
-	Prefix4,
-	Prefix5,
-	Prefix6,
-	--compare prefix3 column and prefix4 column
-	IIF((PATINDEX('%[0-9]%',Prefix4)>0 OR PATINDEX('F%R',Prefix4)>0 OR PATINDEX('%HOUSE%',Prefix4)>0 OR PATINDEX('CENT%',Prefix4)>0 OR PATINDEX('SECOND%',Prefix4)>0 OR PATINDEX('B%G',Prefix4)>0 OR PATINDEX('DEP%',Prefix4)>0)  --like 3 1/1 | 4TH FLOOR | BLOCK 12 | MARITIME CENTER => 12
-		AND (LEN(ISNULL(Prefix3,''))=0 OR PATINDEX('NO%',Prefix3)>0 OR PATINDEX('LEVEL%',Prefix3)>0 OR PATINDEX('%[0-9]%',Prefix3)>0  OR PATINDEX('BLOCK%',Prefix3)>0 OR PATINDEX('APART%T',Prefix3)>0 OR PATINDEX('[&/]%',Prefix3)>0),12,
-		IIF(LEN(ISNULL(Prefix3,''))=0 OR PATINDEX('NO%',Prefix3)>0 OR PATINDEX('LEVEL%',Prefix3)>0 OR PATINDEX('%[0-9]%',Prefix3)>0  OR PATINDEX('BLOCK%',Prefix3)>0 OR PATINDEX('APART%T',Prefix3)>0 OR PATINDEX('[&/]%',Prefix3)>0,1,0)) Pref34Match,
-		--IIF(PATINDEX('NO%',Prefix3)>0 OR PATINDEX('LEVEL%',Prefix3)>0 OR PATINDEX('%[0-9]%',Prefix3)>0  OR PATINDEX('BLOCK%',Prefix3)>0 OR PATINDEX('[&/]%',Prefix3)>0,1,
-		--	IIF(PATINDEX('[0-9]%',Prefix4)>0 OR PATINDEX('F%R',Prefix4)>0 OR PATINDEX('%HOUSE%',Prefix4)>0 OR PATINDEX('CENT%',Prefix4)>0 OR PATINDEX('SECOND%',Prefix4)>0 OR PATINDEX('B%G',Prefix4)>0 OR PATINDEX('DEP%',Prefix4)>0,2,0))) Pref34Match, -- if prefix4 is empty and prefix3 is contain numbers => 1, else => 0
-	Street, 
-	HasStreet,
-	Seperated_Addr_Prefix, 
-	Cleared_Addr_Contact,
-	Original_City,
-	Cleared_City,
-	CityMatchIndex,
-	Contacts
-FROM STEP9_4)
-SELECT 
-	PickupId,
-	CustomerId,
-	CustomerName,
-	Original_Address,
-	Cleared_Address,
-	TRIM(CONCAT(Building,' ',CASE Pref34Match WHEN 12 THEN CONCAT(Prefix3,' ',Prefix4) WHEN 1 THEN Prefix3 ELSE NULL END)) Building,
-	TRIM(CONCAT(ISNULL(Prefix2,''),' ',ISNULL(CASE WHEN Pref34Match IN (12,1) THEN NULL ELSE Prefix3 END,''))) Prefix3, --building terms removed from prefix3 field and concat with cleared Prefix2
-	TRIM(CASE Pref34Match WHEN 12 THEN NULL ELSE Prefix4 END) Prefix4, --building terms removed from prefix4 field
+	--Prefix2,
+	--Prefix3,
 	--Prefix4,
 	Prefix5,
 	Prefix6,
@@ -685,13 +676,13 @@ SELECT
 	Cleared_City,
 	CityMatchIndex,
 	Contacts
-INTO #tmpPickupAddresses11 --save to memory simplify query expression table
-FROM STEP9_5
---DROP TABLE #tmpPickupAddresses10
+INTO #PrefixMatch_2_3
+FROM STEP9_3
+DROP TABLE #PrefixMatch_1_2
+--SELECT * FROM #PrefixMatch_2_3 WHERE PickupId IN (11928)
 
-
---SELECT * FROM #tmpPickupAddresses11 WHERE PickupId IN (10042,10043)
-;WITH STEP9_7 AS(
+--Prefix match on 3 and 4 prefix columns
+;WITH STEP9_5 AS(
 SELECT 
 	PickupId,
 	CustomerId,
@@ -699,16 +690,21 @@ SELECT
 	Original_Address,
 	Cleared_Address,
 	Building,
-	CASE WHEN Prefix3='ROAD' THEN CONCAT(Cleared_City,' ',Prefix3) ELSE Prefix3 END Prefix3, --fix truncated road names during city name removal from address at begining, Ex: 286A RAJAGIRIYA ROAD, RAJAGIRIYA
-	Prefix4, 
+	ToConcat,
+	ToMatch1,
+	ToMatch2,
+	--Prefix1, 
+	--Prefix2,
+	--Prefix3,
+	--Prefix4,
 	Prefix5,
 	Prefix6,
-	--compare prefix4 column and prefix5 column
-	IIF((PATINDEX('%[0-9]%',Prefix5)>0 OR PATINDEX('F%R%',Prefix5)>0 OR PATINDEX('%HOUSE%',Prefix5)>0 OR PATINDEX('CENT%',Prefix5)>0 OR PATINDEX('SECOND%',Prefix5)>0 OR PATINDEX('B%G',Prefix5)>0 OR PATINDEX('DEP%',Prefix5)>0)  --like 3 1/1 | 4TH FLOOR | BLOCK 12 | MARITIME CENTER => 12
-		AND (LEN(ISNULL(Prefix4,''))=0 OR PATINDEX('NO%',Prefix4)>0 OR PATINDEX('LEVEL%',Prefix4)>0 OR PATINDEX('%[0-9]%',Prefix4)>0  OR PATINDEX('BLOCK%',Prefix4)>0 OR PATINDEX('APART%T',Prefix4)>0 OR PATINDEX('[&/]%',Prefix4)>0),12,
-		IIF(LEN(ISNULL(Prefix4,''))=0 OR PATINDEX('NO%',Prefix4)>0 OR PATINDEX('LEVEL%',Prefix4)>0 OR PATINDEX('%[0-9]%',Prefix4)>0  OR PATINDEX('BLOCK%',Prefix4)>0 OR PATINDEX('APART%T',Prefix4)>0 OR PATINDEX('[&/]%',Prefix4)>0,1,0)) Pref45Match,
-		--IIF(PATINDEX('NO%',Prefix4)>0 OR PATINDEX('LEVEL%',Prefix4)>0 OR PATINDEX('%[0-9]%',Prefix4)>0  OR PATINDEX('BLOCK%',Prefix4)>0 OR PATINDEX('[&/]%',Prefix4)>0,1,
-		--IIF(PATINDEX('[0-9]%',Prefix5)>0 OR PATINDEX('F%R%',Prefix5)>0 OR PATINDEX('%HOUSE%',Prefix5)>0 OR PATINDEX('CENT%',Prefix5)>0 OR PATINDEX('SECOND%',Prefix5)>0 OR PATINDEX('B%G',Prefix5)>0 OR PATINDEX('DEP%',Prefix5)>0,2,0))) Pref45Match, -- if prefix5 is empty and prefix4 is contain numbers => 1, else => 0
+	--compare prefix3 column and prefix4 column
+	IIF(
+		((PATINDEX('[#/]',ToMatch1)>0 OR PATINDEX('NO%',ToMatch1)>0 OR CHARINDEX('LEVEL',ToMatch1)>0 OR PATINDEX('%[0-9]%',ToMatch1)>0 OR CHARINDEX('BLOCK',ToMatch1)>0 OR CHARINDEX('LOT',ToMatch1)>0 OR PATINDEX('APART%NT',ToMatch1)>0 OR LEN(TRIM(ISNULL(ToMatch1,'')))=0) AND ((PATINDEX('%[0-9]%[^HD]',ToMatch2)>0 OR PATINDEX('[0-9]',ToMatch2)>0 OR PATINDEX('%[0-9]%[0-9,]',ToMatch2)>0) AND LEN(ISNULL(ToMatch2,'')) BETWEEN 0 AND 7)) --like "NO 5/2" | "LEVEL 4" | "3 1/1" | "LOT 4" | "BLOCK 12" | "12" AND Prefix2 is not a Tel# (max len=5) 
+		OR (PATINDEX('%[0-9]%',ToMatch1)>0 AND (PATINDEX('%FL[OR]%',ToMatch2)>0 OR CHARINDEX('POST',ToMatch2)>0)) --like "7th FLOOR" | "07A POST"
+		OR (PATINDEX('PO%',ToMatch1)>0 AND PATINDEX('BOX%',ToMatch2)>0),12,--like PO BOX
+			IIF((PATINDEX('%[0-9]%[^HDL]',ToMatch1)>0 OR PATINDEX('%[0-9]%[0-9,]',ToMatch1)>0 OR PATINDEX('%[0-9]/%',ToMatch1)>0) AND LEN(REPLACE(ToMatch1,',','')) BETWEEN 3 AND 6,1,0)) PrefixMatch,
 	Street, 
 	HasStreet,
 	Seperated_Addr_Prefix, 
@@ -717,28 +713,97 @@ SELECT
 	Cleared_City,
 	CityMatchIndex,
 	Contacts
-FROM #tmpPickupAddresses11)
+FROM #PrefixMatch_2_3)
 SELECT 
 	PickupId,
 	CustomerId,
 	CustomerName,
 	Original_Address,
 	Cleared_Address,
-	TRIM(CONCAT(Building,' ',CASE Pref45Match WHEN 12 THEN CONCAT(Prefix4,' ',Prefix5) WHEN 1 THEN Prefix4 ELSE NULL END)) Building,
-	TRIM(CONCAT(ISNULL(Prefix3,''),' ',ISNULL(CASE WHEN Pref45Match IN (12,1) THEN NULL ELSE Prefix4 END,''))) Prefix4, --building terms removed from prefix4 field and concat with cleared Prefix2
-	TRIM(CASE Pref45Match WHEN 12 THEN NULL ELSE Prefix5 END) Prefix5, --building terms removed from prefix5 field
+	TRIM(CONCAT(Building,' ',CASE PrefixMatch WHEN 12 THEN TRIM(CONCAT(ToMatch1,' ',ToMatch2)) WHEN 1 THEN ToMatch1 ELSE NULL END)) Building,
+	TRIM(CONCAT(ISNULL(ToConcat,''),' ',ISNULL(CASE WHEN PrefixMatch IN (12,1) THEN NULL ELSE ToMatch1 END,''))) ToConcat, --building terms removed from prefix3 field and concat with cleared Prefix2
+	TRIM(CASE PrefixMatch WHEN 12 THEN NULL ELSE ToMatch2 END) ToMatch1, --building terms removed from prefix4 field
+	Prefix5 ToMatch2,
+	--Prefix1, 
+	--Prefix2,
+	--Prefix3,
+	--Prefix4,
 	--Prefix5,
-	TRIM(CONCAT(ISNULL(Prefix6,''),' ',TRIM(CONCAT(ISNULL(Street,''),' ',Seperated_Addr_Prefix)))) Prefix6, --move street field and seperated_addr_prefix field to prefix6 for filter
+	Prefix6,
+	Street, 
+	HasStreet,
+	Seperated_Addr_Prefix, 
 	Cleared_Addr_Contact,
 	Original_City,
 	Cleared_City,
 	CityMatchIndex,
 	Contacts
-INTO #tmpPickupAddresses12
-FROM STEP9_7
+INTO #PrefixMatch_3_4 --save to memory simplify query expression table
+FROM STEP9_5
+DROP TABLE #PrefixMatch_2_3
+--SELECT * FROM #PrefixMatch_3_4 WHERE PickupId IN (11928)
 
---SELECT * FROM #tmpPickupAddresses12 WHERE PickupId IN (10042,10043)
---seperate prefix6 into further more prefixes
+--Prefix match on 4 and 5 prefix columns
+;WITH STEP9_7 AS(
+SELECT 
+	PickupId,
+	CustomerId,
+	CustomerName,
+	Original_Address,
+	Cleared_Address,
+	Building,
+	CASE WHEN ToConcat IN ('ROAD','ESTATE') THEN CONCAT(Cleared_City,' ',ToConcat) ELSE ToConcat END ToConcat, --fix truncated road names during city name removal from address at begining, Ex: Original=>286A RAJAGIRIYA ROAD, RAJAGIRIYA | Cleared=>286A ROAD | AfterFix=>286A RAJAGIRIYA ROAD  / HANWELLA ESTATE
+	ToMatch1, 
+	ToMatch2,
+	--Prefix1, 
+	--Prefix2,
+	--Prefix3,
+	--Prefix4,
+	--Prefix5,
+	Prefix6,
+	--compare prefix4 column and prefix5 column
+	IIF(
+		((PATINDEX('[#/]',ToMatch1)>0 OR PATINDEX('NO%',ToMatch1)>0 OR CHARINDEX('LEVEL',ToMatch1)>0 OR PATINDEX('%[0-9]%',ToMatch1)>0 OR CHARINDEX('BLOCK',ToMatch1)>0 OR CHARINDEX('LOT',ToMatch1)>0 OR PATINDEX('APART%NT',ToMatch1)>0 OR LEN(TRIM(ISNULL(ToMatch1,'')))=0) AND ((PATINDEX('%[0-9]%[^HD]',ToMatch2)>0 OR PATINDEX('[0-9]',ToMatch2)>0 OR PATINDEX('%[0-9]%[0-9,]',ToMatch2)>0) AND LEN(ISNULL(ToMatch2,'')) BETWEEN 0 AND 7))
+		OR (PATINDEX('%[0-9]%',ToMatch1)>0 AND (PATINDEX('%FL[OR]%',ToMatch2)>0 OR CHARINDEX('POST',ToMatch2)>0)) 
+		OR (PATINDEX('PO%',ToMatch1)>0 AND PATINDEX('BOX%',ToMatch2)>0),12,
+			IIF((PATINDEX('%[0-9]%[^HDL]',ToMatch1)>0 OR PATINDEX('%[0-9]%[0-9,]',ToMatch1)>0 OR PATINDEX('%[0-9]/%',ToMatch1)>0) AND LEN(REPLACE(ToMatch1,',','')) BETWEEN 3 AND 6,1,0)) PrefixMatch,
+	Street, 
+	HasStreet,
+	Seperated_Addr_Prefix, 
+	Cleared_Addr_Contact,
+	Original_City,
+	Cleared_City,
+	CityMatchIndex,
+	Contacts
+FROM #PrefixMatch_3_4)
+SELECT 
+	PickupId,
+	CustomerId,
+	CustomerName,
+	Original_Address,
+	Cleared_Address,
+	TRIM(CONCAT(Building,' ',CASE PrefixMatch WHEN 12 THEN TRIM(CONCAT(ToMatch1,' ',ToMatch2)) WHEN 1 THEN ToMatch1 ELSE NULL END)) Building,
+	TRIM(CONCAT(ISNULL(ToConcat,''),' ',ISNULL(CASE WHEN PrefixMatch IN (12,1) THEN NULL ELSE ToMatch1 END,''))) ToConcat, --building terms removed from prefix3 field and concat with cleared Prefix2
+	TRIM(CASE PrefixMatch WHEN 12 THEN NULL ELSE ToMatch2 END) ToMatch1, --building terms removed from prefix4 field
+	Prefix6 ToMatch2,
+	--TRIM(CONCAT(ISNULL(Prefix6,''),' ',TRIM(CONCAT(ISNULL(Street,''),' ',Seperated_Addr_Prefix)))) ToMatch2, --move street field and seperated_addr_prefix field to prefix6 for filter
+	--Prefix1, 
+	--Prefix2,
+	--Prefix3,
+	--Prefix4,
+	--Prefix5,
+	--Prefix6,
+	Cleared_Addr_Contact,
+	Original_City,
+	Cleared_City,
+	CityMatchIndex,
+	Contacts
+INTO #PrefixMatch_4_5
+FROM STEP9_7
+DROP TABLE #PrefixMatch_3_4
+--SELECT * FROM #PrefixMatch_4_5 WHERE PickupId IN (11928)
+
+--seperate prefix6 into further more prefixes, to search for remain building terms(if exists)
 ;WITH SETP10_1 AS(
 SELECT 
 	PickupId,
@@ -747,16 +812,16 @@ SELECT
 	Original_Address,
 	Cleared_Address,
 	Building,
-	Prefix4,
-	Prefix5,
-	TRIM(IIF(CHARINDEX(' ', Prefix6)>0,SUBSTRING(Prefix6,1,CHARINDEX(' ', Prefix6)),Prefix6)) Prefix6, -- seperate remain address field by spaces
-	TRIM(IIF(CHARINDEX(' ', Prefix6)>0,STUFF(Prefix6,1,CHARINDEX(' ', Prefix6),''),NULL)) Prefix7,
+	ToConcat,
+	ToMatch1,
+	TRIM(IIF(CHARINDEX(' ', ToMatch2)>0,SUBSTRING(ToMatch2,1,CHARINDEX(' ', ToMatch2)),ToMatch2)) Prefix6, -- seperate remain address field by spaces
+	TRIM(IIF(CHARINDEX(' ', ToMatch2)>0,STUFF(ToMatch2,1,CHARINDEX(' ', ToMatch2),''),NULL)) Prefix7,
 	Cleared_Addr_Contact,
 	Original_City,
 	Cleared_City,
 	CityMatchIndex,
 	Contacts
-FROM #tmpPickupAddresses12)
+FROM #PrefixMatch_4_5)
 ,SETP10_2 AS(
 SELECT 
 	PickupId,
@@ -765,8 +830,8 @@ SELECT
 	Original_Address,
 	Cleared_Address,
 	Building,
-	Prefix4,
-	Prefix5,
+	ToConcat,
+	ToMatch1,
 	Prefix6,
 	TRIM(IIF(CHARINDEX(' ', Prefix7)>0,SUBSTRING(Prefix7,1,CHARINDEX(' ', Prefix7)),Prefix7)) Prefix7, -- seperate remain address field by spaces
 	TRIM(IIF(CHARINDEX(' ', Prefix7)>0,STUFF(Prefix7,1,CHARINDEX(' ', Prefix7),''),NULL)) Prefix8,
@@ -784,8 +849,8 @@ SELECT
 	Original_Address,
 	Cleared_Address,
 	Building,
-	Prefix4,
-	Prefix5,
+	ToConcat,
+	ToMatch1,
 	Prefix6,
 	Prefix7,
 	TRIM(IIF(CHARINDEX(' ', Prefix8)>0,SUBSTRING(Prefix8,1,CHARINDEX(' ', Prefix8)),Prefix8)) Prefix8, -- seperate remain address field by spaces
@@ -804,8 +869,8 @@ SELECT
 	Original_Address,
 	Cleared_Address,
 	Building,
-	Prefix4,
-	Prefix5,
+	ToConcat,
+	ToMatch1,
 	Prefix6,
 	Prefix7,
 	Prefix8,
@@ -824,9 +889,10 @@ SELECT
 	Original_Address,
 	Cleared_Address,
 	Building,
-	Prefix4,
-	Prefix5,
-	Prefix6,
+	ToConcat,
+	ToMatch1,
+	Prefix6 AS ToMatch2,
+	--Prefix6,
 	Prefix7,
 	Prefix8,
 	Prefix9,
@@ -839,9 +905,9 @@ SELECT
 	Contacts
 INTO #tmpPickupAddresses13
 FROM SETP10_4
+DROP TABLE #PrefixMatch_4_5
 
-
---SELECT * FROM #tmpPickupAddresses13 WHERE PickupId IN (10042,10043)
+--Prefix match on 5 and 6 prefix columns
 ;WITH STEP11_1 AS
 (SELECT 
 	PickupId,
@@ -850,17 +916,20 @@ FROM SETP10_4
 	Original_Address,
 	Cleared_Address,
 	Building,
-	Prefix4,
-	Prefix5,
-	Prefix6,
+	ToConcat,
+	ToMatch1, 
+	ToMatch2,
+	--Prefix6,
 	Prefix7,
 	Prefix8,
 	Prefix9,
 	Prefix10,
 	Prefix11,
-	IIF((PATINDEX('%[0-9]%',Prefix6)>0 OR PATINDEX('F%R%',Prefix6)>0 OR PATINDEX('%HOUSE%',Prefix6)>0 OR PATINDEX('CENT%',Prefix6)>0 OR PATINDEX('SECOND%',Prefix6)>0 OR PATINDEX('B%G',Prefix6)>0 OR PATINDEX('DEP%',Prefix6)>0)  --like 3 1/1 | 4TH FLOOR | BLOCK 12 | MARITIME CENTER => 12
-		AND (LEN(ISNULL(Prefix5,''))=0 OR PATINDEX('NO%',Prefix5)>0 OR PATINDEX('LEVEL%',Prefix5)>0 OR PATINDEX('%[0-9]%',Prefix5)>0  OR PATINDEX('BLOCK%',Prefix5)>0 OR PATINDEX('APART%T',Prefix5)>0 OR PATINDEX('[&/]%',Prefix5)>0),12,
-		IIF(LEN(ISNULL(Prefix5,''))=0 OR PATINDEX('NO%',Prefix5)>0 OR PATINDEX('LEVEL%',Prefix5)>0 OR PATINDEX('%[0-9]%',Prefix5)>0  OR PATINDEX('BLOCK%',Prefix5)>0 OR PATINDEX('APART%T',Prefix5)>0 OR PATINDEX('[&/]%',Prefix5)>0,1,0)) Pref56Match,
+	IIF(
+		((PATINDEX('[#/]',ToMatch1)>0 OR PATINDEX('NO%',ToMatch1)>0 OR CHARINDEX('LEVEL',ToMatch1)>0 OR PATINDEX('%[0-9]%',ToMatch1)>0 OR CHARINDEX('BLOCK',ToMatch1)>0 OR CHARINDEX('LOT',ToMatch1)>0 OR PATINDEX('APART%NT',ToMatch1)>0 OR LEN(TRIM(ISNULL(ToMatch1,'')))=0) AND ((PATINDEX('%[0-9]%[^HD]',ToMatch2)>0 OR PATINDEX('[0-9]',ToMatch2)>0 OR PATINDEX('%[0-9]%[0-9,]',ToMatch2)>0) AND LEN(ISNULL(ToMatch2,'')) BETWEEN 0 AND 7))
+		OR (PATINDEX('%[0-9]%',ToMatch1)>0 AND (PATINDEX('%FL[OR]%',ToMatch2)>0 OR CHARINDEX('POST',ToMatch2)>0)) 
+		OR (PATINDEX('PO%',ToMatch1)>0 AND PATINDEX('BOX%',ToMatch2)>0),12,
+			IIF((PATINDEX('%[0-9]%[^HDL]',ToMatch1)>0 OR PATINDEX('%[0-9]%[0-9,]',ToMatch1)>0 OR PATINDEX('%[0-9]/%',ToMatch1)>0) AND LEN(REPLACE(ToMatch1,',','')) BETWEEN 3 AND 6,1,0)) PrefixMatch,
 	Cleared_Addr_Contact,
 	Original_City,
 	Cleared_City,
@@ -874,57 +943,11 @@ SELECT
 	CustomerName,
 	Original_Address,
 	Cleared_Address,
-	TRIM(CONCAT(Building,' ',CASE Pref56Match WHEN 12 THEN CONCAT(Prefix5,' ',Prefix6) WHEN 1 THEN Prefix5 ELSE NULL END)) Building,
-	TRIM(CONCAT(ISNULL(Prefix4,''),' ',ISNULL(CASE WHEN Pref56Match IN (12,1) THEN NULL ELSE Prefix5 END,''))) Prefix5, --building terms removed from prefix4 field and concat with cleared Prefix2
-	TRIM(CASE Pref56Match WHEN 12 THEN NULL ELSE Prefix6 END) Prefix6, --building terms removed from prefix5 field
-	Prefix7,
-	Prefix8,
-	Prefix9,
-	Prefix10,
-	Prefix11,
-	Cleared_Addr_Contact,
-	Original_City,
-	Cleared_City,
-	CityMatchIndex,
-	Contacts
-INTO #tmpPickupAddresses14
-FROM STEP11_1
---)
-
-;WITH STEP11_3 AS(
-SELECT 
-	PickupId,
-	CustomerId,
-	CustomerName,
-	Original_Address,
-	Cleared_Address,
-	Building,
-	Prefix5,
-	Prefix6,
-	Prefix7,
-	Prefix8,
-	Prefix9,
-	Prefix10,
-	Prefix11,
-	IIF((PATINDEX('%[0-9]%',Prefix7)>0 OR PATINDEX('F%R%',Prefix7)>0 OR PATINDEX('%HOUSE%',Prefix7)>0 OR PATINDEX('CENT%',Prefix7)>0 OR PATINDEX('SECOND%',Prefix7)>0 OR PATINDEX('B%G',Prefix7)>0 OR PATINDEX('DEP%',Prefix7)>0)  --like 3 1/1 | 4TH FLOOR | BLOCK 12 | MARITIME CENTER => 12
-		AND (LEN(ISNULL(Prefix6,''))=0 OR PATINDEX('NO%',Prefix6)>0 OR PATINDEX('LEVEL%',Prefix6)>0 OR PATINDEX('%[0-9]%',Prefix6)>0  OR PATINDEX('BLOCK%',Prefix6)>0 OR PATINDEX('APART%T',Prefix6)>0 OR PATINDEX('[&/]%',Prefix6)>0),12,
-		IIF(LEN(ISNULL(Prefix6,''))=0 OR PATINDEX('NO%',Prefix6)>0 OR PATINDEX('LEVEL%',Prefix6)>0 OR PATINDEX('%[0-9]%',Prefix6)>0  OR PATINDEX('BLOCK%',Prefix6)>0 OR PATINDEX('APART%T',Prefix6)>0 OR PATINDEX('[&/]%',Prefix6)>0,1,0)) Pref67Match,
-	Cleared_Addr_Contact,
-	Original_City,
-	Cleared_City,
-	CityMatchIndex,
-	Contacts
-FROM #tmpPickupAddresses14)
-,STEP11_4 AS(
-SELECT 
-	PickupId,
-	CustomerId,
-	CustomerName,
-	Original_Address,
-	Cleared_Address,
-	TRIM(CONCAT(Building,' ',CASE Pref67Match WHEN 12 THEN CONCAT(Prefix6,' ',Prefix7) WHEN 1 THEN Prefix6 ELSE NULL END)) Building,
-	TRIM(CONCAT(ISNULL(Prefix5,''),' ',ISNULL(CASE WHEN Pref67Match IN (12,1) THEN NULL ELSE Prefix6 END,''))) Prefix6, --building terms removed from prefix4 field and concat with cleared Prefix2
-	TRIM(CASE Pref67Match WHEN 12 THEN NULL ELSE Prefix7 END) Prefix7, --building terms removed from prefix5 field
+	TRIM(CONCAT(Building,' ',CASE PrefixMatch WHEN 12 THEN TRIM(CONCAT(ToMatch1,' ',ToMatch2)) WHEN 1 THEN ToMatch1 ELSE NULL END)) Building,
+	TRIM(CONCAT(ISNULL(ToConcat,''),' ',ISNULL(CASE WHEN PrefixMatch IN (12,1) THEN NULL ELSE ToMatch1 END,''))) ToConcat, --building terms removed from prefix3 field and concat with cleared Prefix2
+	TRIM(CASE PrefixMatch WHEN 12 THEN NULL ELSE ToMatch2 END) ToMatch1, --building terms removed from prefix4 field
+	Prefix7 ToMatch2,
+	--Prefix6,
 	--Prefix7,
 	Prefix8,
 	Prefix9,
@@ -935,8 +958,12 @@ SELECT
 	Cleared_City,
 	CityMatchIndex,
 	Contacts
-FROM STEP11_3)
-,STEP11_5 AS(
+INTO #PrefixMatch_5_6
+FROM STEP11_1
+DROP TABLE #tmpPickupAddresses13
+
+--Prefix match on 6 and 7 prefix columns
+;WITH STEP11_3 AS(
 SELECT 
 	PickupId,
 	CustomerId,
@@ -944,30 +971,39 @@ SELECT
 	Original_Address,
 	Cleared_Address,
 	Building,
-	Prefix6,
-	Prefix7,
+	ToConcat,
+	ToMatch1, 
+	ToMatch2,
+	--Prefix6,
+	--Prefix7,
 	Prefix8,
 	Prefix9,
 	Prefix10,
 	Prefix11,
-	IIF((PATINDEX('%[0-9]%',Prefix8)>0 OR PATINDEX('F%R%',Prefix8)>0 OR PATINDEX('%HOUSE%',Prefix8)>0 OR PATINDEX('CENT%',Prefix8)>0 OR PATINDEX('SECOND%',Prefix8)>0 OR PATINDEX('B%G',Prefix8)>0 OR PATINDEX('DEP%',Prefix8)>0)  --like 3 1/1 | 4TH FLOOR | BLOCK 12 | MARITIME CENTER => 12
-		AND (LEN(ISNULL(Prefix7,''))=0 OR PATINDEX('NO%',Prefix7)>0 OR PATINDEX('LEVEL%',Prefix7)>0 OR PATINDEX('%[0-9]%',Prefix7)>0  OR PATINDEX('BLOCK%',Prefix7)>0 OR PATINDEX('APART%T',Prefix7)>0 OR PATINDEX('[&/]%',Prefix7)>0),12,
-		IIF(LEN(ISNULL(Prefix7,''))=0 OR PATINDEX('NO%',Prefix7)>0 OR PATINDEX('LEVEL%',Prefix7)>0 OR PATINDEX('%[0-9]%',Prefix7)>0  OR PATINDEX('BLOCK%',Prefix7)>0 OR PATINDEX('APART%T',Prefix7)>0 OR PATINDEX('[&/]%',Prefix7)>0,1,0)) Pref78Match,
+	IIF(
+		((PATINDEX('[#/]',ToMatch1)>0 OR PATINDEX('NO%',ToMatch1)>0 OR CHARINDEX('LEVEL',ToMatch1)>0 OR PATINDEX('%[0-9]%',ToMatch1)>0 OR CHARINDEX('BLOCK',ToMatch1)>0 OR CHARINDEX('LOT',ToMatch1)>0 OR PATINDEX('APART%NT',ToMatch1)>0 OR LEN(TRIM(ISNULL(ToMatch1,'')))=0) AND ((PATINDEX('%[0-9]%[^HD]',ToMatch2)>0 OR PATINDEX('[0-9]',ToMatch2)>0 OR PATINDEX('%[0-9]%[0-9,]',ToMatch2)>0) AND LEN(ISNULL(ToMatch2,'')) BETWEEN 0 AND 7))
+		OR (PATINDEX('%[0-9]%',ToMatch1)>0 AND (PATINDEX('%FL[OR]%',ToMatch2)>0 OR CHARINDEX('POST',ToMatch2)>0)) 
+		OR (PATINDEX('PO%',ToMatch1)>0 AND PATINDEX('BOX%',ToMatch2)>0),12,
+			IIF((PATINDEX('%[0-9]%[^HDL]',ToMatch1)>0 OR PATINDEX('%[0-9]%[0-9,]',ToMatch1)>0 OR PATINDEX('%[0-9]/%',ToMatch1)>0) AND LEN(REPLACE(ToMatch1,',','')) BETWEEN 3 AND 6,1,0)) PrefixMatch,
 	Cleared_Addr_Contact,
 	Original_City,
 	Cleared_City,
 	CityMatchIndex,
 	Contacts
-FROM STEP11_4)
+FROM #PrefixMatch_5_6)
+--,STEP11_4 AS(
 SELECT 
 	PickupId,
 	CustomerId,
 	CustomerName,
 	Original_Address,
 	Cleared_Address,
-	TRIM(CONCAT(Building,' ',CASE Pref78Match WHEN 12 THEN CONCAT(Prefix7,' ',Prefix8) WHEN 1 THEN Prefix7 ELSE NULL END)) Building,
-	TRIM(CONCAT(ISNULL(Prefix6,''),' ',ISNULL(CASE WHEN Pref78Match IN (12,1) THEN NULL ELSE Prefix7 END,''))) Prefix7, --building terms removed from prefix4 field and concat with cleared Prefix2
-	TRIM(CASE Pref78Match WHEN 12 THEN NULL ELSE Prefix8 END) Prefix8, --building terms removed from prefix5 field
+	TRIM(CONCAT(Building,' ',CASE PrefixMatch WHEN 12 THEN TRIM(CONCAT(ToMatch1,' ',ToMatch2)) WHEN 1 THEN ToMatch1 ELSE NULL END)) Building,
+	TRIM(CONCAT(ISNULL(ToConcat,''),' ',ISNULL(CASE WHEN PrefixMatch IN (12,1) THEN NULL ELSE ToMatch1 END,''))) ToConcat, --building terms removed from prefix3 field and concat with cleared Prefix2
+	TRIM(CASE PrefixMatch WHEN 12 THEN NULL ELSE ToMatch2 END) ToMatch1, --building terms removed from prefix4 field
+	Prefix8 ToMatch2,
+	--Prefix6,
+	--Prefix7,
 	--Prefix8,
 	Prefix9,
 	Prefix10,
@@ -977,17 +1013,12 @@ SELECT
 	Cleared_City,
 	CityMatchIndex,
 	Contacts
-INTO #tmpPickupAddresses15
-FROM STEP11_5
+INTO #PrefixMatch_6_7
+FROM STEP11_3
+DROP TABLE #PrefixMatch_5_6
 
---release memory
-DROP TABLE #tmpPickupAddresses10
-DROP TABLE #tmpPickupAddresses11
-DROP TABLE #tmpPickupAddresses12
-DROP TABLE #tmpPickupAddresses13
-DROP TABLE #tmpPickupAddresses14
-
-;WITH STEP11_7 AS(
+--Prefix match on 7 and 8 prefix columns
+;WITH STEP11_5 AS(
 SELECT 
 	PickupId,
 	CustomerId,
@@ -995,30 +1026,39 @@ SELECT
 	Original_Address,
 	Cleared_Address,
 	Building,
-	Prefix7,
-	Prefix8,
+	ToConcat,
+	ToMatch1, 
+	ToMatch2,
+	--Prefix6,
+	--Prefix7,
+	--Prefix8,
 	Prefix9,
 	Prefix10,
 	Prefix11,
-	IIF((PATINDEX('%[0-9]%',Prefix9)>0 OR PATINDEX('F%R%',Prefix9)>0 OR PATINDEX('%HOUSE%',Prefix9)>0 OR PATINDEX('CENT%',Prefix9)>0 OR PATINDEX('SECOND%',Prefix9)>0 OR PATINDEX('B%G',Prefix9)>0 OR PATINDEX('DEP%',Prefix9)>0)  --like 3 1/1 | 4TH FLOOR | BLOCK 12 | MARITIME CENTER => 12
-		AND (LEN(ISNULL(Prefix8,''))=0 OR PATINDEX('NO%',Prefix8)>0 OR PATINDEX('LEVEL%',Prefix8)>0 OR PATINDEX('%[0-9]%',Prefix8)>0  OR PATINDEX('BLOCK%',Prefix8)>0 OR PATINDEX('APART%T',Prefix9)>0 OR PATINDEX('[&/]%',Prefix8)>0),12,
-		IIF(LEN(ISNULL(Prefix8,''))=0 OR PATINDEX('NO%',Prefix8)>0 OR PATINDEX('LEVEL%',Prefix8)>0 OR PATINDEX('%[0-9]%',Prefix8)>0  OR PATINDEX('BLOCK%',Prefix8)>0 OR PATINDEX('APART%T',Prefix9)>0 OR PATINDEX('[&/]%',Prefix8)>0,1,0)) Pref89Match,
+	IIF(
+		((PATINDEX('[#/]',ToMatch1)>0 OR PATINDEX('NO%',ToMatch1)>0 OR CHARINDEX('LEVEL',ToMatch1)>0 OR PATINDEX('%[0-9]%',ToMatch1)>0 OR CHARINDEX('BLOCK',ToMatch1)>0 OR CHARINDEX('LOT',ToMatch1)>0 OR PATINDEX('APART%NT',ToMatch1)>0 OR LEN(TRIM(ISNULL(ToMatch1,'')))=0) AND ((PATINDEX('%[0-9]%[^HD]',ToMatch2)>0 OR PATINDEX('[0-9]',ToMatch2)>0 OR PATINDEX('%[0-9]%[0-9,]',ToMatch2)>0) AND LEN(ISNULL(ToMatch2,'')) BETWEEN 0 AND 7))
+		OR (PATINDEX('%[0-9]%',ToMatch1)>0 AND (PATINDEX('%FL[OR]%',ToMatch2)>0 OR CHARINDEX('POST',ToMatch2)>0)) 
+		OR (PATINDEX('PO%',ToMatch1)>0 AND PATINDEX('BOX%',ToMatch2)>0),12,
+			IIF((PATINDEX('%[0-9]%[^HDL]',ToMatch1)>0 OR PATINDEX('%[0-9]%[0-9,]',ToMatch1)>0 OR PATINDEX('%[0-9]/%',ToMatch1)>0) AND LEN(REPLACE(ToMatch1,',','')) BETWEEN 3 AND 6,1,0)) PrefixMatch,
 	Cleared_Addr_Contact,
 	Original_City,
 	Cleared_City,
 	CityMatchIndex,
 	Contacts
-FROM #tmpPickupAddresses15)
-,STEP11_8 AS(
+FROM #PrefixMatch_6_7)
 SELECT 
 	PickupId,
 	CustomerId,
 	CustomerName,
 	Original_Address,
 	Cleared_Address,
-	TRIM(CONCAT(Building,' ',CASE Pref89Match WHEN 12 THEN CONCAT(Prefix8,' ',Prefix9) WHEN 1 THEN Prefix8 ELSE NULL END)) Building,
-	TRIM(CONCAT(ISNULL(Prefix7,''),' ',ISNULL(CASE WHEN Pref89Match IN (12,1) THEN NULL ELSE Prefix8 END,''))) Prefix8, --building terms removed from prefix4 field and concat with cleared Prefix2
-	TRIM(CASE Pref89Match WHEN 12 THEN NULL ELSE Prefix9 END) Prefix9, --building terms removed from prefix5 field
+	TRIM(CONCAT(Building,' ',CASE PrefixMatch WHEN 12 THEN TRIM(CONCAT(ToMatch1,' ',ToMatch2)) WHEN 1 THEN ToMatch1 ELSE NULL END)) Building,
+	TRIM(CONCAT(ISNULL(ToConcat,''),' ',ISNULL(CASE WHEN PrefixMatch IN (12,1) THEN NULL ELSE ToMatch1 END,''))) ToConcat, --building terms removed from prefix3 field and concat with cleared Prefix2
+	TRIM(CASE PrefixMatch WHEN 12 THEN NULL ELSE ToMatch2 END) ToMatch1, --building terms removed from prefix4 field
+	Prefix9 ToMatch2,
+	--Prefix6,
+	--Prefix7,
+	--Prefix8,
 	--Prefix9,
 	Prefix10,
 	Prefix11,
@@ -1027,8 +1067,12 @@ SELECT
 	Cleared_City,
 	CityMatchIndex,
 	Contacts
-FROM STEP11_7)
-,STEP11_9 AS(
+INTO #PrefixMatch_7_8
+FROM STEP11_5
+DROP TABLE #PrefixMatch_6_7
+
+--Prefix match on 8 and 9 prefix columns
+;WITH STEP11_7 AS(
 SELECT 
 	PickupId,
 	CustomerId,
@@ -1036,28 +1080,40 @@ SELECT
 	Original_Address,
 	Cleared_Address,
 	Building,
-	Prefix8,
-	Prefix9,
+	ToConcat,
+	ToMatch1, 
+	ToMatch2,
+	--Prefix6,
+	--Prefix7,
+	--Prefix8,
+	--Prefix9,
 	Prefix10,
 	Prefix11,
-	IIF((PATINDEX('%[0-9]%',Prefix10)>0 OR PATINDEX('F%R%',Prefix10)>0 OR PATINDEX('%HOUSE%',Prefix10)>0 OR PATINDEX('CENT%',Prefix10)>0 OR PATINDEX('SECOND%',Prefix10)>0 OR PATINDEX('B%G',Prefix10)>0 OR PATINDEX('DEP%',Prefix10)>0)  --like 3 1/1 | 4TH FLOOR | BLOCK 12 | MARITIME CENTER => 12
-		AND (LEN(ISNULL(Prefix9,''))=0 OR PATINDEX('NO%',Prefix9)>0 OR PATINDEX('LEVEL%',Prefix9)>0 OR PATINDEX('%[0-9]%',Prefix9)>0  OR PATINDEX('BLOCK%',Prefix9)>0 OR PATINDEX('APART%T',Prefix9)>0 OR PATINDEX('[&/]%',Prefix9)>0),12,
-		IIF(LEN(ISNULL(Prefix9,''))=0 OR PATINDEX('NO%',Prefix9)>0 OR PATINDEX('LEVEL%',Prefix9)>0 OR PATINDEX('%[0-9]%',Prefix9)>0  OR PATINDEX('BLOCK%',Prefix9)>0 OR PATINDEX('APART%T',Prefix9)>0 OR PATINDEX('[&/]%',Prefix9)>0,1,0)) Pref910Match,
+	IIF(
+		((PATINDEX('[#/]',ToMatch1)>0 OR PATINDEX('NO%',ToMatch1)>0 OR CHARINDEX('LEVEL',ToMatch1)>0 OR PATINDEX('%[0-9]%',ToMatch1)>0 OR CHARINDEX('BLOCK',ToMatch1)>0 OR CHARINDEX('LOT',ToMatch1)>0 OR PATINDEX('APART%NT',ToMatch1)>0 OR LEN(TRIM(ISNULL(ToMatch1,'')))=0) AND ((PATINDEX('%[0-9]%[^HD]',ToMatch2)>0 OR PATINDEX('[0-9]',ToMatch2)>0 OR PATINDEX('%[0-9]%[0-9,]',ToMatch2)>0) AND LEN(ISNULL(ToMatch2,'')) BETWEEN 0 AND 7))
+		OR (PATINDEX('%[0-9]%',ToMatch1)>0 AND (PATINDEX('%FL[OR]%',ToMatch2)>0 OR CHARINDEX('POST',ToMatch2)>0)) 
+		OR (PATINDEX('PO%',ToMatch1)>0 AND PATINDEX('BOX%',ToMatch2)>0),12,
+			IIF((PATINDEX('%[0-9]%[^HDL]',ToMatch1)>0 OR PATINDEX('%[0-9]%[0-9,]',ToMatch1)>0 OR PATINDEX('%[0-9]/%',ToMatch1)>0) AND LEN(REPLACE(ToMatch1,',','')) BETWEEN 3 AND 6,1,0)) PrefixMatch,--88A | 88, | 141/9
 	Cleared_Addr_Contact,
 	Original_City,
 	Cleared_City,
 	CityMatchIndex,
 	Contacts
-FROM STEP11_8)
+FROM #PrefixMatch_7_8)
 SELECT 
 	PickupId,
 	CustomerId,
 	CustomerName,
 	Original_Address,
 	Cleared_Address,
-	TRIM(CONCAT(Building,' ',CASE Pref910Match WHEN 12 THEN CONCAT(Prefix9,' ',Prefix10) WHEN 1 THEN Prefix9 ELSE NULL END)) Building,
-	TRIM(CONCAT(ISNULL(Prefix8,''),' ',ISNULL(CASE WHEN Pref910Match IN (12,1) THEN NULL ELSE Prefix9 END,''))) Prefix9, --building terms removed from prefix4 field and concat with cleared Prefix2
-	TRIM(CASE Pref910Match WHEN 12 THEN NULL ELSE Prefix10 END) Prefix10, --building terms removed from prefix5 field
+	TRIM(CONCAT(Building,' ',CASE PrefixMatch WHEN 12 THEN TRIM(CONCAT(ToMatch1,' ',ToMatch2)) WHEN 1 THEN ToMatch1 ELSE NULL END)) Building,
+	TRIM(CONCAT(ISNULL(ToConcat,''),' ',ISNULL(CASE WHEN PrefixMatch IN (12,1) THEN NULL ELSE ToMatch1 END,''))) ToConcat, --building terms removed from prefix3 field and concat with cleared Prefix2
+	TRIM(CASE PrefixMatch WHEN 12 THEN NULL ELSE ToMatch2 END) ToMatch1, --building terms removed from prefix4 field
+	Prefix10 ToMatch2,
+	--Prefix6,
+	--Prefix7,
+	--Prefix8,
+	--Prefix9,
 	--Prefix10,
 	Prefix11,
 	Cleared_Addr_Contact,
@@ -1065,10 +1121,65 @@ SELECT
 	Cleared_City,
 	CityMatchIndex,
 	Contacts
-INTO #tmpPickupAddresses16
-FROM STEP11_9
-DROP TABLE #tmpPickupAddresses15
+INTO #PrefixMatch_8_9
+FROM STEP11_7
+DROP TABLE #PrefixMatch_7_8
 
+--Prefix match on 9 and 10 prefix columns
+;WITH STEP11_9 AS(
+SELECT 
+	PickupId,
+	CustomerId,
+	CustomerName,
+	Original_Address,
+	Cleared_Address,
+	Building,
+	ToConcat,
+	ToMatch1, 
+	ToMatch2,
+	--Prefix6,
+	--Prefix7,
+	--Prefix8,
+	--Prefix9,
+	--Prefix10,
+	Prefix11,
+	IIF(
+		((PATINDEX('[#/]',ToMatch1)>0 OR PATINDEX('NO%',ToMatch1)>0 OR CHARINDEX('LEVEL',ToMatch1)>0 OR PATINDEX('%[0-9]%',ToMatch1)>0 OR CHARINDEX('BLOCK',ToMatch1)>0 OR CHARINDEX('LOT',ToMatch1)>0 OR PATINDEX('APART%NT',ToMatch1)>0 OR LEN(TRIM(ISNULL(ToMatch1,'')))=0) AND ((PATINDEX('%[0-9]%[^HD]',ToMatch2)>0 OR PATINDEX('[0-9]',ToMatch2)>0 OR PATINDEX('%[0-9]%[0-9,]',ToMatch2)>0) AND LEN(ISNULL(ToMatch2,'')) BETWEEN 0 AND 7))
+		OR (PATINDEX('%[0-9]%',ToMatch1)>0 AND (PATINDEX('%FL[OR]%',ToMatch2)>0 OR CHARINDEX('POST',ToMatch2)>0)) 
+		OR (PATINDEX('PO%',ToMatch1)>0 AND PATINDEX('BOX%',ToMatch2)>0),12,
+			IIF((PATINDEX('%[0-9]%[^HDL]',ToMatch1)>0 OR PATINDEX('%[0-9]%[0-9,]',ToMatch1)>0 OR PATINDEX('%[0-9]/%',ToMatch1)>0) AND LEN(REPLACE(ToMatch1,',','')) BETWEEN 3 AND 6,1,0)) PrefixMatch,
+	Cleared_Addr_Contact,
+	Original_City,
+	Cleared_City,
+	CityMatchIndex,
+	Contacts
+FROM #PrefixMatch_8_9)
+SELECT 
+	PickupId,
+	CustomerId,
+	CustomerName,
+	Original_Address,
+	Cleared_Address,
+	TRIM(CONCAT(Building,' ',CASE PrefixMatch WHEN 12 THEN TRIM(CONCAT(ToMatch1,' ',ToMatch2)) WHEN 1 THEN ToMatch1 ELSE NULL END)) Building,
+	TRIM(CONCAT(ISNULL(ToConcat,''),' ',ISNULL(CASE WHEN PrefixMatch IN (12,1) THEN NULL ELSE ToMatch1 END,''))) ToConcat, --building terms removed from prefix3 field and concat with cleared Prefix2
+	TRIM(CASE PrefixMatch WHEN 12 THEN NULL ELSE ToMatch2 END) ToMatch1, --building terms removed from prefix4 field
+	Prefix11 ToMatch2,
+	--Prefix6,
+	--Prefix7,
+	--Prefix8,
+	--Prefix9,
+	--Prefix10,
+	--Prefix11,
+	Cleared_Addr_Contact,
+	Original_City,
+	Cleared_City,
+	CityMatchIndex,
+	Contacts
+INTO #PrefixMatch_9_10
+FROM STEP11_9
+DROP TABLE #PrefixMatch_8_9
+
+--Prefix match on 10 and 11 prefix columns
 ;WITH STEP11_11 AS(
 SELECT 
 	PickupId,
@@ -1077,37 +1188,51 @@ SELECT
 	Original_Address,
 	Cleared_Address,
 	Building,
-	Prefix9,
-	Prefix10,
-	Prefix11,
-	IIF((PATINDEX('%[0-9]%',Prefix11)>0 OR PATINDEX('F%R%',Prefix11)>0 OR PATINDEX('%HOUSE%',Prefix11)>0 OR PATINDEX('CENT%',Prefix11)>0 OR PATINDEX('SECOND%',Prefix11)>0 OR PATINDEX('B%G',Prefix11)>0 OR PATINDEX('DEP%',Prefix11)>0)  --like 3 1/1 | 4TH FLOOR | BLOCK 12 | MARITIME CENTER => 12
-		AND (LEN(ISNULL(Prefix10,''))=0 OR PATINDEX('NO%',Prefix10)>0 OR PATINDEX('LEVEL%',Prefix10)>0 OR PATINDEX('%[0-9]%',Prefix10)>0  OR PATINDEX('BLOCK%',Prefix10)>0 OR PATINDEX('APART%T',Prefix10)>0 OR PATINDEX('[&/]%',Prefix10)>0),12,
-		IIF(LEN(ISNULL(Prefix10,''))=0 OR PATINDEX('NO%',Prefix10)>0 OR PATINDEX('LEVEL%',Prefix10)>0 OR PATINDEX('%[0-9]%',Prefix10)>0  OR PATINDEX('BLOCK%',Prefix10)>0 OR PATINDEX('APART%T',Prefix10)>0 OR PATINDEX('[&/]%',Prefix10)>0,1,0)) Pref1011Match,
+	ToConcat,
+	ToMatch1, 
+	ToMatch2,
+	--Prefix6,
+	--Prefix7,
+	--Prefix8,
+	--Prefix9,
+	--Prefix10,
+	--Prefix11,
+	IIF(
+		((PATINDEX('[#/]',ToMatch1)>0 OR PATINDEX('NO%',ToMatch1)>0 OR CHARINDEX('LEVEL',ToMatch1)>0 OR PATINDEX('%[0-9]%',ToMatch1)>0 OR CHARINDEX('BLOCK',ToMatch1)>0 OR CHARINDEX('LOT',ToMatch1)>0 OR PATINDEX('APART%NT',ToMatch1)>0 OR LEN(TRIM(ISNULL(ToMatch1,'')))=0) AND ((PATINDEX('%[0-9]%[^HD]',ToMatch2)>0 OR PATINDEX('[0-9]',ToMatch2)>0 OR PATINDEX('%[0-9]%[0-9,]',ToMatch2)>0) AND LEN(ISNULL(ToMatch2,'')) BETWEEN 0 AND 7))
+		OR (PATINDEX('%[0-9]%',ToMatch1)>0 AND (PATINDEX('%FL[OR]%',ToMatch2)>0 OR CHARINDEX('POST',ToMatch2)>0)) 
+		OR (PATINDEX('PO%',ToMatch1)>0 AND PATINDEX('BOX%',ToMatch2)>0),12,
+			IIF((PATINDEX('%[0-9]%[^HDL]',ToMatch1)>0 OR PATINDEX('%[0-9]%[0-9,]',ToMatch1)>0 OR PATINDEX('%[0-9]/%',ToMatch1)>0) AND LEN(REPLACE(ToMatch1,',','')) BETWEEN 3 AND 6,1,0)) PrefixMatch,
 	Cleared_Addr_Contact,
 	Original_City,
 	Cleared_City,
 	CityMatchIndex,
 	Contacts
-FROM #tmpPickupAddresses16)
+FROM #PrefixMatch_9_10)
 SELECT 
 	PickupId,
 	CustomerId,
 	CustomerName,
 	Original_Address,
 	Cleared_Address,
-	TRIM(CONCAT(Building,' ',CASE Pref1011Match WHEN 12 THEN CONCAT(Prefix10,' ',Prefix11) WHEN 1 THEN Prefix10 ELSE NULL END)) Building,
-	TRIM(CONCAT(ISNULL(Prefix9,''),' ',ISNULL(CASE WHEN Pref1011Match IN (12,1) THEN NULL ELSE Prefix10 END,''))) Prefix10, --building terms removed from prefix4 field and concat with cleared Prefix2
-	TRIM(CASE Pref1011Match WHEN 12 THEN NULL ELSE Prefix11 END) Prefix11, --building terms removed from prefix5 field
+	TRIM(CONCAT(Building,' ',CASE PrefixMatch WHEN 12 THEN TRIM(CONCAT(ToMatch1,' ',ToMatch2)) WHEN 1 THEN ToMatch1 ELSE NULL END)) Building,
+	TRIM(CONCAT(ISNULL(ToConcat,''),' ',ISNULL(CASE WHEN PrefixMatch IN (12,1) THEN NULL ELSE ToMatch1 END,''))) ToConcat, --building terms removed from prefix3 field and concat with cleared Prefix2
+	TRIM(CASE PrefixMatch WHEN 12 THEN NULL ELSE ToMatch2 END) ToMatch1, --building terms removed from prefix4 field
+	--Prefix6,
+	--Prefix7,
+	--Prefix8,
+	--Prefix9,
+	--Prefix10,
+	--Prefix11,
 	Cleared_Addr_Contact,
 	Original_City,
 	Cleared_City,
 	CityMatchIndex,
 	Contacts
-INTO #tmpPickupAddresses17
+INTO #PrefixMatch_10_11
 FROM STEP11_11
-DROP TABLE #tmpPickupAddresses16
+DROP TABLE #PrefixMatch_9_10
 
---Prefix11 further seperation
+--Prefix11 column further more seperation, to search for remain building terms(if exists)
 ;WITH SETP12_1 AS(
 SELECT 
 	PickupId,
@@ -1116,15 +1241,15 @@ SELECT
 	Original_Address,
 	Cleared_Address,
 	Building,
-	Prefix10,
-	TRIM(IIF(CHARINDEX(' ', Prefix11)>0,SUBSTRING(Prefix11,1,CHARINDEX(' ', Prefix11)),Prefix11)) Prefix11, -- seperate remain address field by spaces
-	TRIM(IIF(CHARINDEX(' ', Prefix11)>0,STUFF(Prefix11,1,CHARINDEX(' ', Prefix11),''),NULL)) Prefix12,
+	ToConcat,
+	TRIM(IIF(CHARINDEX(' ', ToMatch1)>0,SUBSTRING(ToMatch1,1,CHARINDEX(' ', ToMatch1)),ToMatch1)) Prefix11, -- seperate remain address field by spaces
+	TRIM(IIF(CHARINDEX(' ', ToMatch1)>0,STUFF(ToMatch1,1,CHARINDEX(' ', ToMatch1),''),NULL)) Prefix12,
 	Cleared_Addr_Contact,
 	Original_City,
 	Cleared_City,
 	CityMatchIndex,
 	Contacts
-FROM #tmpPickupAddresses17)
+FROM #PrefixMatch_10_11)
 ,SETP12_2 AS(
 SELECT 
 	PickupId,
@@ -1133,7 +1258,7 @@ SELECT
 	Original_Address,
 	Cleared_Address,
 	Building,
-	Prefix10,
+	ToConcat,
 	Prefix11,
 	TRIM(IIF(CHARINDEX(' ', Prefix12)>0,SUBSTRING(Prefix12,1,CHARINDEX(' ', Prefix12)),Prefix12)) Prefix12, -- seperate remain address field by spaces
 	TRIM(IIF(CHARINDEX(' ', Prefix12)>0,STUFF(Prefix12,1,CHARINDEX(' ', Prefix12),''),NULL)) Prefix13,
@@ -1151,7 +1276,7 @@ SELECT
 	Original_Address,
 	Cleared_Address,
 	Building,
-	Prefix10,
+	ToConcat,
 	Prefix11,
 	Prefix12,
 	TRIM(IIF(CHARINDEX(' ', Prefix13)>0,SUBSTRING(Prefix13,1,CHARINDEX(' ', Prefix13)),Prefix13)) Prefix13, -- seperate remain address field by spaces
@@ -1169,9 +1294,9 @@ SELECT
 	Original_Address,
 	Cleared_Address,
 	Building,
-	Prefix10,
-	Prefix11,
-	Prefix12,
+	ToConcat,
+	Prefix11 AS ToMatch1,
+	Prefix12 AS ToMatch2,
 	Prefix13,
 	TRIM(IIF(CHARINDEX(' ', Prefix14)>0,SUBSTRING(Prefix14,1,CHARINDEX(' ', Prefix14)),Prefix14)) Prefix14, -- seperate remain address field by spaces
 	TRIM(IIF(CHARINDEX(' ', Prefix14)>0,STUFF(Prefix14,1,CHARINDEX(' ', Prefix14),''),NULL)) Prefix15,
@@ -1182,9 +1307,9 @@ SELECT
 	Contacts
 INTO #tmpPickupAddresses18
 FROM SETP12_3
-DROP TABLE #tmpPickupAddresses17
+DROP TABLE #PrefixMatch_10_11
 
-
+--Prefix match on 11 and 12 prefix columns
 ;WITH STEP12_1 AS(
 SELECT 
 	PickupId,
@@ -1193,32 +1318,34 @@ SELECT
 	Original_Address,
 	Cleared_Address,
 	Building,
-	Prefix10,
-	Prefix11,
-	Prefix12,
+	ToConcat,
+	ToMatch1,
+	ToMatch2,
 	Prefix13,
 	Prefix14,
 	Prefix15,
-	IIF((PATINDEX('%[0-9]%',Prefix12)>0 OR PATINDEX('F%R%',Prefix12)>0 OR PATINDEX('%HOUSE%',Prefix12)>0 OR PATINDEX('CENT%',Prefix12)>0 OR PATINDEX('SECOND%',Prefix12)>0 OR PATINDEX('B%G',Prefix12)>0 OR PATINDEX('DEP%',Prefix12)>0)  --like 3 1/1 | 4TH FLOOR | BLOCK 12 | MARITIME CENTER => 12
-		AND (LEN(ISNULL(Prefix11,''))=0 OR PATINDEX('NO%',Prefix11)>0 OR PATINDEX('LEVEL%',Prefix11)>0 OR PATINDEX('%[0-9]%',Prefix11)>0  OR PATINDEX('BLOCK%',Prefix11)>0 OR PATINDEX('APART%T',Prefix11)>0 OR PATINDEX('[&/]%',Prefix11)>0),12,
-		IIF(LEN(ISNULL(Prefix11,''))=0 OR PATINDEX('NO%',Prefix11)>0 OR PATINDEX('LEVEL%',Prefix11)>0 OR PATINDEX('%[0-9]%',Prefix11)>0  OR PATINDEX('BLOCK%',Prefix11)>0 OR PATINDEX('APART%T',Prefix11)>0 OR PATINDEX('[&/]%',Prefix11)>0,1,0)) Pref1112Match,
+	IIF(
+		((PATINDEX('[#/]',ToMatch1)>0 OR PATINDEX('NO%',ToMatch1)>0 OR CHARINDEX('LEVEL',ToMatch1)>0 OR PATINDEX('%[0-9]%',ToMatch1)>0 OR CHARINDEX('BLOCK',ToMatch1)>0 OR CHARINDEX('LOT',ToMatch1)>0 OR PATINDEX('APART%NT',ToMatch1)>0 OR LEN(TRIM(ISNULL(ToMatch1,'')))=0) AND ((PATINDEX('%[0-9]%[^HD]',ToMatch2)>0 OR PATINDEX('[0-9]',ToMatch2)>0 OR PATINDEX('%[0-9]%[0-9,]',ToMatch2)>0) AND LEN(ISNULL(ToMatch2,'')) BETWEEN 0 AND 7))
+		OR (PATINDEX('%[0-9]%',ToMatch1)>0 AND (PATINDEX('%FL[OR]%',ToMatch2)>0 OR CHARINDEX('POST',ToMatch2)>0)) 
+		OR (PATINDEX('PO%',ToMatch1)>0 AND PATINDEX('BOX%',ToMatch2)>0),12,
+			IIF((PATINDEX('%[0-9]%[^HDL]',ToMatch1)>0 OR PATINDEX('%[0-9]%[0-9,]',ToMatch1)>0 OR PATINDEX('%[0-9]/%',ToMatch1)>0) AND LEN(REPLACE(ToMatch1,',','')) BETWEEN 3 AND 6,1,0)) PrefixMatch,
 	Cleared_Addr_Contact,
 	Original_City,
 	Cleared_City,
 	CityMatchIndex,
 	Contacts
 FROM #tmpPickupAddresses18)
-,STEP12_2 AS(
 SELECT 
 	PickupId,
 	CustomerId,
 	CustomerName,
 	Original_Address,
 	Cleared_Address,
-	TRIM(CONCAT(Building,' ',CASE Pref1112Match WHEN 12 THEN CONCAT(Prefix11,' ',Prefix12) WHEN 1 THEN Prefix11 ELSE NULL END)) Building,
-	TRIM(CONCAT(ISNULL(Prefix10,''),' ',ISNULL(CASE WHEN Pref1112Match IN (12,1) THEN NULL ELSE Prefix11 END,''))) Prefix11, --building terms removed from prefix4 field and concat with cleared Prefix2
-	TRIM(CASE Pref1112Match WHEN 12 THEN NULL ELSE Prefix12 END) Prefix12, --building terms removed from prefix5 field
-	Prefix13,
+	TRIM(CONCAT(Building,' ',CASE PrefixMatch WHEN 12 THEN TRIM(CONCAT(ToMatch1,' ',ToMatch2)) WHEN 1 THEN ToMatch1 ELSE NULL END)) Building,
+	TRIM(CONCAT(ISNULL(ToConcat,''),' ',ISNULL(CASE WHEN PrefixMatch IN (12,1) THEN NULL ELSE ToMatch1 END,''))) ToConcat, --building terms removed from prefix3 field and concat with cleared Prefix2
+	TRIM(CASE PrefixMatch WHEN 12 THEN NULL ELSE ToMatch2 END) ToMatch1, --building terms removed from prefix4 field
+	Prefix13 ToMatch2,
+	--Prefix13,
 	Prefix14,
 	Prefix15,
 	Cleared_Addr_Contact,
@@ -1226,8 +1353,12 @@ SELECT
 	Cleared_City,
 	CityMatchIndex,
 	Contacts
-FROM STEP12_1)
-,STEP12_3 AS(
+INTO #PrefixMatch_11_12
+FROM STEP12_1
+DROP TABLE #tmpPickupAddresses18
+
+--Prefix match on 12 and 13 prefix columns
+;WITH STEP12_3 AS(
 SELECT 
 	PickupId,
 	CustomerId,
@@ -1235,20 +1366,23 @@ SELECT
 	Original_Address,
 	Cleared_Address,
 	Building,
-	Prefix11,
-	Prefix12,
-	Prefix13,
+	ToConcat,
+	ToMatch1,
+	ToMatch2,
+	--Prefix13,
 	Prefix14,
 	Prefix15,
-	IIF((PATINDEX('%[0-9]%',Prefix13)>0 OR PATINDEX('F%R%',Prefix13)>0 OR PATINDEX('%HOUSE%',Prefix13)>0 OR PATINDEX('CENT%',Prefix13)>0 OR PATINDEX('SECOND%',Prefix13)>0 OR PATINDEX('B%G',Prefix13)>0 OR PATINDEX('DEP%',Prefix13)>0)  --like 3 1/1 | 4TH FLOOR | BLOCK 12 | MARITIME CENTER => 12
-		AND (LEN(ISNULL(Prefix12,''))=0 OR PATINDEX('NO%',Prefix12)>0 OR PATINDEX('LEVEL%',Prefix12)>0 OR PATINDEX('%[0-9]%',Prefix12)>0  OR PATINDEX('BLOCK%',Prefix12)>0 OR PATINDEX('APART%T',Prefix12)>0 OR PATINDEX('[&/]%',Prefix12)>0),12,
-		IIF(LEN(ISNULL(Prefix12,''))=0 OR PATINDEX('NO%',Prefix12)>0 OR PATINDEX('LEVEL%',Prefix12)>0 OR PATINDEX('%[0-9]%',Prefix12)>0  OR PATINDEX('BLOCK%',Prefix12)>0 OR PATINDEX('APART%T',Prefix12)>0 OR PATINDEX('[&/]%',Prefix12)>0,1,0)) Pref1213Match,
+	IIF(
+		((PATINDEX('[#/]',ToMatch1)>0 OR PATINDEX('NO%',ToMatch1)>0 OR CHARINDEX('LEVEL',ToMatch1)>0 OR PATINDEX('%[0-9]%',ToMatch1)>0 OR CHARINDEX('BLOCK',ToMatch1)>0 OR CHARINDEX('LOT',ToMatch1)>0 OR PATINDEX('APART%NT',ToMatch1)>0 OR LEN(TRIM(ISNULL(ToMatch1,'')))=0) AND ((PATINDEX('%[0-9]%[^HD]',ToMatch2)>0 OR PATINDEX('[0-9]',ToMatch2)>0 OR PATINDEX('%[0-9]%[0-9,]',ToMatch2)>0) AND LEN(ISNULL(ToMatch2,'')) BETWEEN 0 AND 7)) 
+		OR (PATINDEX('%[0-9]%',ToMatch1)>0 AND (PATINDEX('%FL[OR]%',ToMatch2)>0 OR CHARINDEX('POST',ToMatch2)>0)) 
+		OR (PATINDEX('PO%',ToMatch1)>0 AND PATINDEX('BOX%',ToMatch2)>0),12, 
+			IIF((PATINDEX('%[0-9]%[^HDL]',ToMatch1)>0 OR PATINDEX('%[0-9]%[0-9,]',ToMatch1)>0 OR PATINDEX('%[0-9]/%',ToMatch1)>0) AND LEN(REPLACE(ToMatch1,',','')) BETWEEN 3 AND 6,1,0)) PrefixMatch,
 	Cleared_Addr_Contact,
 	Original_City,
 	Cleared_City,
 	CityMatchIndex,
 	Contacts
-FROM STEP12_2
+FROM #PrefixMatch_11_12
 )
 SELECT 
 	PickupId,
@@ -1256,20 +1390,23 @@ SELECT
 	CustomerName,
 	Original_Address,
 	Cleared_Address,
-	TRIM(CONCAT(Building,' ',CASE Pref1213Match WHEN 12 THEN CONCAT(Prefix12,' ',Prefix13) WHEN 1 THEN Prefix12 ELSE NULL END)) Building,
-	TRIM(CONCAT(ISNULL(Prefix11,''),' ',ISNULL(CASE WHEN Pref1213Match IN (12,1) THEN NULL ELSE Prefix12 END,''))) Prefix12, --building terms removed from prefix4 field and concat with cleared Prefix2
-	TRIM(CASE Pref1213Match WHEN 12 THEN NULL ELSE Prefix13 END) Prefix13, --building terms removed from prefix5 field
-	Prefix14,
+	TRIM(CONCAT(Building,' ',CASE PrefixMatch WHEN 12 THEN TRIM(CONCAT(ToMatch1,' ',ToMatch2)) WHEN 1 THEN ToMatch1 ELSE NULL END)) Building,
+	TRIM(CONCAT(ISNULL(ToConcat,''),' ',ISNULL(CASE WHEN PrefixMatch IN (12,1) THEN NULL ELSE ToMatch1 END,''))) ToConcat, --building terms removed from prefix3 field and concat with cleared Prefix2
+	TRIM(CASE PrefixMatch WHEN 12 THEN NULL ELSE ToMatch2 END) ToMatch1, --building terms removed from prefix4 field
+	Prefix14 ToMatch2,
+	--Prefix13,
+	--Prefix14,
 	Prefix15,
 	Cleared_Addr_Contact,
 	Original_City,
 	Cleared_City,
 	CityMatchIndex,
 	Contacts
-INTO #tmpPickupAddresses19
+INTO #PrefixMatch_12_13
 FROM STEP12_3
-DROP TABLE #tmpPickupAddresses18
+DROP TABLE #PrefixMatch_11_12
 
+--Prefix match on 13 and 14 prefix columns
 ;WITH STEP12_5 AS(
 SELECT 
 	PickupId,
@@ -1278,37 +1415,49 @@ SELECT
 	Original_Address,
 	Cleared_Address,
 	Building,
-	Prefix12,
-	Prefix13,
-	Prefix14,
+	ToConcat,
+	ToMatch1,
+	ToMatch2,
+	--Prefix13,
+	--Prefix14,
 	Prefix15,
-	IIF((PATINDEX('%[0-9]%',Prefix14)>0 OR PATINDEX('F%R%',Prefix14)>0 OR PATINDEX('%HOUSE%',Prefix14)>0 OR PATINDEX('CENT%',Prefix14)>0 OR PATINDEX('SECOND%',Prefix14)>0 OR PATINDEX('B%G',Prefix14)>0 OR PATINDEX('DEP%',Prefix14)>0)  --like 3 1/1 | 4TH FLOOR | BLOCK 12 | MARITIME CENTER => 12
-		AND (LEN(ISNULL(Prefix13,''))=0 OR PATINDEX('NO%',Prefix13)>0 OR PATINDEX('LEVEL%',Prefix13)>0 OR PATINDEX('%[0-9]%',Prefix13)>0  OR PATINDEX('BLOCK%',Prefix13)>0 OR PATINDEX('APART%T',Prefix13)>0 OR PATINDEX('[&/]%',Prefix13)>0),12,
-		IIF(LEN(ISNULL(Prefix13,''))=0 OR PATINDEX('NO%',Prefix13)>0 OR PATINDEX('LEVEL%',Prefix13)>0 OR PATINDEX('%[0-9]%',Prefix13)>0  OR PATINDEX('BLOCK%',Prefix13)>0 OR PATINDEX('APART%T',Prefix13)>0 OR PATINDEX('[&/]%',Prefix13)>0,1,0)) Pref1314Match,
+	IIF(
+		((PATINDEX('[#/]',ToMatch1)>0 OR PATINDEX('NO%',ToMatch1)>0 OR CHARINDEX('LEVEL',ToMatch1)>0 OR PATINDEX('%[0-9]%',ToMatch1)>0 OR CHARINDEX('BLOCK',ToMatch1)>0 OR CHARINDEX('LOT',ToMatch1)>0 OR PATINDEX('APART%NT',ToMatch1)>0 OR LEN(TRIM(ISNULL(ToMatch1,'')))=0) AND ((PATINDEX('%[0-9]%[^HD]',ToMatch2)>0 OR PATINDEX('[0-9]',ToMatch2)>0 OR PATINDEX('%[0-9]%[0-9,]',ToMatch2)>0) AND LEN(ISNULL(ToMatch2,'')) BETWEEN 0 AND 7))
+		OR (PATINDEX('%[0-9]%',ToMatch1)>0 AND (PATINDEX('%FL[OR]%',ToMatch2)>0 OR CHARINDEX('POST',ToMatch2)>0)) 
+		OR (PATINDEX('PO%',ToMatch1)>0 AND PATINDEX('BOX%',ToMatch2)>0),12,
+			IIF((PATINDEX('%[0-9]%[^HDL]',ToMatch1)>0 OR PATINDEX('%[0-9]%[0-9,]',ToMatch1)>0 OR PATINDEX('%[0-9]/%',ToMatch1)>0) AND LEN(REPLACE(ToMatch1,',','')) BETWEEN 3 AND 6,1,0)) PrefixMatch,
 	Cleared_Addr_Contact,
 	Original_City,
 	Cleared_City,
 	CityMatchIndex,
 	Contacts
-FROM #tmpPickupAddresses19)
-,STEP12_6 AS(
+FROM #PrefixMatch_12_13)
+--,STEP12_6 AS(
 SELECT 
 	PickupId,
 	CustomerId,
 	CustomerName,
 	Original_Address,
 	Cleared_Address,
-	TRIM(CONCAT(Building,' ',CASE Pref1314Match WHEN 12 THEN CONCAT(Prefix13,' ',Prefix14) WHEN 1 THEN Prefix13 ELSE NULL END)) Building,
-	TRIM(CONCAT(ISNULL(Prefix12,''),' ',ISNULL(CASE WHEN Pref1314Match IN (12,1) THEN NULL ELSE Prefix13 END,''))) Prefix13, --building terms removed from prefix4 field and concat with cleared Prefix2
-	TRIM(CASE Pref1314Match WHEN 12 THEN NULL ELSE Prefix14 END) Prefix14, --building terms removed from prefix5 field
-	Prefix15,
+	TRIM(CONCAT(Building,' ',CASE PrefixMatch WHEN 12 THEN TRIM(CONCAT(ToMatch1,' ',ToMatch2)) WHEN 1 THEN ToMatch1 ELSE NULL END)) Building,
+	TRIM(CONCAT(ISNULL(ToConcat,''),' ',ISNULL(CASE WHEN PrefixMatch IN (12,1) THEN NULL ELSE ToMatch1 END,''))) ToConcat, --building terms removed from prefix3 field and concat with cleared Prefix2
+	TRIM(CASE PrefixMatch WHEN 12 THEN NULL ELSE ToMatch2 END) ToMatch1, --building terms removed from prefix4 field
+	Prefix15 ToMatch2,
+	--Prefix13,
+	--Prefix14,
+	--Prefix15,
 	Cleared_Addr_Contact,
 	Original_City,
 	Cleared_City,
 	CityMatchIndex,
 	Contacts
-FROM STEP12_5)
-,STEP12_7 AS(
+INTO #PrefixMatch_13_14
+FROM STEP12_5
+DROP TABLE #PrefixMatch_12_13
+
+
+--Prefix match on 14 and 15 prefix columns
+;WITH STEP12_7 AS(
 SELECT 
 	PickupId,
 	CustomerId,
@@ -1316,36 +1465,46 @@ SELECT
 	Original_Address,
 	Cleared_Address,
 	Building,
-	Prefix13,
-	Prefix14,
-	Prefix15,
-	IIF((PATINDEX('%[0-9]%',Prefix15)>0 OR PATINDEX('F%R%',Prefix15)>0 OR PATINDEX('%HOUSE%',Prefix15)>0 OR PATINDEX('CENT%',Prefix15)>0 OR PATINDEX('SECOND%',Prefix15)>0 OR PATINDEX('B%G',Prefix15)>0 OR PATINDEX('DEP%',Prefix15)>0)  --like 3 1/1 | 4TH FLOOR | BLOCK 12 | MARITIME CENTER => 12
-		AND (LEN(ISNULL(Prefix14,''))=0 OR PATINDEX('NO%',Prefix14)>0 OR PATINDEX('LEVEL%',Prefix14)>0 OR PATINDEX('%[0-9]%',Prefix14)>0  OR PATINDEX('BLOCK%',Prefix14)>0 OR PATINDEX('APART%T',Prefix14)>0 OR PATINDEX('[&/]%',Prefix14)>0),12,
-		IIF(LEN(ISNULL(Prefix14,''))=0 OR PATINDEX('NO%',Prefix14)>0 OR PATINDEX('LEVEL%',Prefix14)>0 OR PATINDEX('%[0-9]%',Prefix14)>0  OR PATINDEX('BLOCK%',Prefix14)>0 OR PATINDEX('APART%T',Prefix14)>0 OR PATINDEX('[&/]%',Prefix14)>0,1,0)) Pref1415Match,
+	ToConcat,
+	ToMatch1,
+	ToMatch2,
+	--Prefix13,
+	--Prefix14,
+	--Prefix15,
+	IIF(
+		((PATINDEX('[#/]',ToMatch1)>0 OR PATINDEX('NO%',ToMatch1)>0 OR CHARINDEX('LEVEL',ToMatch1)>0 OR PATINDEX('%[0-9]%',ToMatch1)>0 OR CHARINDEX('BLOCK',ToMatch1)>0 OR CHARINDEX('LOT',ToMatch1)>0 OR PATINDEX('APART%NT',ToMatch1)>0 OR LEN(TRIM(ISNULL(ToMatch1,'')))=0) AND ((PATINDEX('%[0-9]%[^HD]',ToMatch2)>0 OR PATINDEX('[0-9]',ToMatch2)>0 OR PATINDEX('%[0-9]%[0-9,]',ToMatch2)>0) AND LEN(ISNULL(ToMatch2,'')) BETWEEN 0 AND 7))
+		OR (PATINDEX('%[0-9]%',ToMatch1)>0 AND (PATINDEX('%FL[OR]%',ToMatch2)>0 OR CHARINDEX('POST',ToMatch2)>0)) 
+		OR (PATINDEX('PO%',ToMatch1)>0 AND PATINDEX('BOX%',ToMatch2)>0),12,
+			IIF((PATINDEX('%[0-9]%[^HDL]',ToMatch1)>0 OR PATINDEX('%[0-9]%[0-9,]',ToMatch1)>0 OR PATINDEX('%[0-9]/%',ToMatch1)>0) AND LEN(REPLACE(ToMatch1,',','')) BETWEEN 3 AND 6,1,0)) PrefixMatch, 
 	Cleared_Addr_Contact,
 	Original_City,
 	Cleared_City,
 	CityMatchIndex,
 	Contacts
-FROM STEP12_6)
+FROM #PrefixMatch_13_14)
 SELECT 
 	PickupId,
 	CustomerId,
 	CustomerName,
 	Original_Address,
 	Cleared_Address,
-	TRIM(CONCAT(Building,' ',CASE Pref1415Match WHEN 12 THEN CONCAT(Prefix14,' ',Prefix15) WHEN 1 THEN Prefix14 ELSE NULL END)) Building,
-	TRIM(CONCAT(ISNULL(Prefix13,''),' ',ISNULL(CASE WHEN Pref1415Match IN (12,1) THEN NULL ELSE Prefix14 END,''))) Prefix14, --building terms removed from prefix14 field and concat with cleared Prefix13
-	TRIM(CASE Pref1415Match WHEN 12 THEN NULL ELSE Prefix15 END) Prefix15, --building terms removed from prefix15 field
+	TRIM(CONCAT(Building,' ',CASE PrefixMatch WHEN 12 THEN TRIM(CONCAT(ToMatch1,' ',ToMatch2)) WHEN 1 THEN ToMatch1 ELSE NULL END)) Building,
+	TRIM(CONCAT(ISNULL(ToConcat,''),' ',ISNULL(CASE WHEN PrefixMatch IN (12,1) THEN NULL ELSE ToMatch1 END,''))) ToConcat, --building terms removed from prefix3 field and concat with cleared Prefix2
+	TRIM(CASE PrefixMatch WHEN 12 THEN NULL ELSE ToMatch2 END) ToMatch1, --building terms removed from prefix4 field
+	--Prefix13,
+	--Prefix14,
+	--Prefix15,
 	Cleared_Addr_Contact,
 	Original_City,
 	Cleared_City,
 	CityMatchIndex,
 	Contacts
-INTO #tmpPickupAddresses20
+INTO #PrefixMatch_14_15
 FROM STEP12_7
-DROP TABLE #tmpPickupAddresses19
+DROP TABLE #PrefixMatch_13_14
 
+
+--Search and Seperation complete, finalize result into Building, Street, City field
 ;WITH Final AS 
 (SELECT 
 	PickupId,
@@ -1354,59 +1513,216 @@ DROP TABLE #tmpPickupAddresses19
 	Original_Address,
 	Cleared_Address,
 	Building,
-	TRIM(CONCAT(TRIM(Prefix14),ISNULL(Prefix15,''))) Street, --concat prefix14 with prefix15 as street
+	TRIM(CONCAT(TRIM(ToConcat),' ',ISNULL(ToMatch1,''))) Street, --concat prefix14 with prefix15 as street
 	Cleared_Addr_Contact,
 	Original_City,
 	Cleared_City,
 	CityMatchIndex,
 	Contacts
-FROM #tmpPickupAddresses20)
-SELECT
+FROM #PrefixMatch_14_15)
+,Final2 AS 
+(SELECT 
+	PickupId,
+	CustomerId,
+	CustomerName,
+	Original_Address,
+	Cleared_Address,
+	Building,
+	(SELECT TOP 1 [value]+CASE [value] WHEN 0 THEN 0 ELSE Increment END --find company names / building / apartments seperation point(index) from street
+	FROM (SELECT PATINDEX('%FACTORY%',Street) [value],7 Increment UNION SELECT PATINDEX('%LTD%',Street) [value],3 Increment UNION 
+		SELECT PATINDEX('%MANAGEMENT%',Street) [value],10 Increment UNION SELECT PATINDEX('%RESIDENT%',Street) [value],8 Increment UNION 
+		SELECT PATINDEX('%HOUSE%',Street) [value],5 Increment UNION SELECT PATINDEX('%BUILDING%',Street) [value],8 Increment UNION
+		SELECT PATINDEX('%BULDING%',Street) [value],7 Increment UNION SELECT PATINDEX('%BILDING%',Street) [value],7 Increment UNION
+		SELECT PATINDEX('%BLDG%',Street) [value],4 Increment UNION SELECT PATINDEX('%DEP %',Street) [value],3 Increment UNION
+		SELECT PATINDEX('%WTC %',Street) [value],3 Increment UNION SELECT PATINDEX('%BANK%',Street) [value],4 Increment UNION 
+		SELECT PATINDEX('%CITY%',Street) [value],4 Increment UNION 
+															--SELECT PATINDEX('%PARK%',Street) [value],4 Increment UNION 
+		SELECT PATINDEX('%FACULTY%',Street) [value],7 Increment UNION SELECT PATINDEX('%COMPLEX%',Street) [value],7 Increment UNION
+		SELECT PATINDEX('%DIVISION%',Street) [value],8 Increment UNION SELECT PATINDEX('%LIMITED%',Street) [value],7 Increment UNION
+		SELECT PATINDEX('%PLC%',Street) [value],3 Increment UNION SELECT PATINDEX('%CENTRE%',Street) [value],6 Increment UNION
+		SELECT PATINDEX('%CORPORATION%',Street) [value],11 Increment UNION SELECT PATINDEX('%BRANCH%',Street) [value],6 Increment UNION
+		SELECT PATINDEX('%UNIT %',Street) [value],4 Increment UNION SELECT PATINDEX('%EXPORTS%',Street) [value],7 Increment UNION  
+		SELECT PATINDEX('%ESTATE%',Street) [value],6 Increment UNION SELECT PATINDEX('%ESTAT%',Street) [value],5 Increment UNION
+		SELECT PATINDEX('%ESTATE%',Street) [value],6 Increment UNION SELECT PATINDEX('%OFFICE%',Street) [value],6 Increment UNION
+		SELECT PATINDEX('%APARTMENTS%',Street) [value],10 Increment UNION SELECT PATINDEX('%CEYLON%',Street) [value],6 Increment) T1
+	ORDER BY [value] DESC) OtherSepIndex,
 	Street,
-	LEN(Street)
-FROM Final
-WHERE LEN(Street)>30
---DROP TABLE ##tmpPickupAddresses17
+	Cleared_Addr_Contact,
+	Original_City,
+	Cleared_City,
+	CityMatchIndex,
+	Contacts
+FROM Final)
+,Final3 AS( 
+SELECT
+	PickupId,
+	CustomerId,
+	CustomerName,
+	Original_Address,
+	Original_City,
+	Cleared_Address,
+	TRIM(SUBSTRING(Street,0,OtherSepIndex+1)) BuildingOther,
+	Building,
+	TRIM(SUBSTRING(Street,OtherSepIndex+1,LEN(Street)+1)) Street,
+	Cleared_City City,
+	LEN(TRIM(Street)) StreetLen,
+	Cleared_Addr_Contact,
+	--CityMatchIndex,
+	Contacts
+FROM Final2)
+SELECT * 
+INTO #Final
+FROM Final3
 
---SELECT * FROM #tmpPickupAddresses15
---WHERE Prefix11 IS NOT NULL
---WHERE PickupId IN (10042,10043)
+--SELECT *
+--FROM #Final
+--WHERE 
+--LEN(TRIM(Street))<=30 
 
---DROP TABLE #tmpPickupAddresses15
+;WITH FINAL AS(
+SELECT  
+	PickupId,
+	CustomerId,
+	CustomerName,
+	Original_Address,
+	Original_City,
+	Cleared_Address,
+	CASE WHEN REPLACE(BuildingOther,'.','') IN ('PVT LTD','(PVT) LTD') THEN '' ELSE  REPLACE(BuildingOther,'.','') END BuildingOther,
+	Building,
+	REPLACE(Street,REPLACE(ISNULL(BuildingOther,''),'.',''),'') Street, --replace duplicate building other values
+	--Street,
+	City,
+	StreetLen,
+	Cleared_Addr_Contact,
+	Contacts
+FROM #Final),
+FINAL2 AS
+(SELECT 
+	PickupId,
+	CustomerId,
+	CustomerName,
+	Original_Address,
+	Original_City,
+	(SELECT STRING_AGG(TRIM([value]),' ') FROM STRING_SPLIT((SELECT STRING_AGG(TRIM([value]),', ') FROM STRING_SPLIT(CONCAT(BuildingOther,' ',Building),',') WHERE TRIM([value])!=''),' ') WHERE TRIM([value])!='') Building,
+	ISNULL((SELECT STRING_AGG(TRIM([value]),' ') FROM STRING_SPLIT((SELECT STRING_AGG(TRIM([value]),', ') FROM STRING_SPLIT(REPLACE(Street,'.',''),',') WHERE TRIM([value])!=''),' ') WHERE TRIM([value])!=''),'NA') Street,
+	City,
+	Cleared_Addr_Contact,
+	Contacts
+FROM FINAL)
+SELECT 
+	PickupId,
+	CustomerId,
+	CustomerName,
+	Original_Address,
+	Original_City,
+	Building,
+	Street,
+	City,
+	Cleared_Addr_Contact,
+	Contacts
+INTO #FINAL2
+FROM FINAL2
 
 
-/*
-CREATE function [dbo].[SplitIntoFixedLength] (
- @string nvarchar(max),
- @stringlength int
-) returns @list table (
- word nvarchar(max)
-)
-as
-begin
-	-- sql function begins
-	if len(@string) > 0 and @stringlength > 0
-	begin
-		declare @inverse_string nvarchar(max)=REVERSE(@string)	
-		declare @i int -- character index
-		set @i = 1
+SELECT 
+	PickupId,
+	F1.CustomerId,
+	NewCus.NewCustomerId,
+	CustomerName,
+	AddGroup.AddressId,
+	F1.Building,
+	F1.Street,
+	F1.City,
+	--Cleared_Addr_Contact,
+	F1.Contacts,
+	CONCAT(P.SP_INSTRUCTIONS,CASE WHEN Cleared_Addr_Contact IS NULL THEN '' ELSE CONCAT(' / ',Cleared_Addr_Contact) END) SpInstructions, --append cleared addr contacts as SpInstructions
+	P.PAYMENT_TYPE,
+	P.PACKAGE_TYPE,
+	P.ACTUAL_WEIGHT,
+	P.AMOUNT,
+	dbo.FnFixedTime(P.PICKUP_FROM,P.PICKUP_DATE,P.CREATED_DATE) PICKUP_FROM,
+	dbo.FnFixedTime(P.PICKUP_TO,P.PICKUP_DATE,P.CREATED_DATE) PICKUP_TO,
+	P.PICKUP_DATE,
+	P.CREATED_BY,
+	P.CREATED_DATE,
+	P.MODIFIED_BY,
+	P.MODIFIED_DATE,
+	P.REMARKS,
+	P.[STATUS]
+INTO #FINAL3
+FROM #FINAL2 F1 INNER JOIN (SELECT CustomerId,ROW_NUMBER() OVER(ORDER BY CustomerId) NewCustomerId 
+	FROM #FINAL2 F1 GROUP BY CustomerId) NewCus
+ON F1.CustomerId=NewCus.CustomerId INNER JOIN (SELECT CustomerId,ROW_NUMBER() OVER(ORDER BY CustomerId) AddressId,ISNULL(Building,'') Building,Street,City
+	FROM #FINAL2 GROUP BY CustomerId,ISNULL(Building,''),Street,City) AddGroup
+ON F1.CustomerId=AddGroup.CustomerId AND ISNULL(F1.Building,'')=AddGroup.Building
+	AND F1.Street=AddGroup.Street AND F1.City=AddGroup.City INNER JOIN dbo.PICKUP P
+ON F1.PickupId=P.PICKUP_ID 
 
-		while @i <= len(@string)
-		begin
-			if @stringlength=1
-				insert into @list(word) select word from 
-				(select SUBSTRING(@string,@i,@stringlength) word) T1 
-				WHERE word NOT IN (SELECT word FROM @list)
-			ELSE
-				insert into @list(word) SELECT word from
-				(select SUBSTRING(@string,@i,@stringlength) word UNION ALL
-				select SUBSTRING(@inverse_string,@i,@stringlength) word) T1
-				WHERE word NOT IN (SELECT word FROM @list)
-			set @i = @i + @stringlength
-		end
-	end
-	return
-end
-GO
-*/
 
+DELETE FROM [FitsExpress_DispatchMgmtDB].dbo.ShipmentPickupCourier
+DELETE FROM [FitsExpress_DispatchMgmtDB].dbo.ShipmentPickupPackage
+DELETE FROM [FitsExpress_DispatchMgmtDB].dbo.ShipmentPickupSnapshot
+DELETE FROM [FitsExpress_DispatchMgmtDB].dbo.ShipmentPickupTpdUpdate
+DELETE FROM [FitsExpress_DispatchMgmtDB].dbo.ShipmentPickup
+DELETE FROM [FitsExpress_DispatchMgmtDB].dbo.PickupCustomerContact
+DELETE FROM [FitsExpress_DispatchMgmtDB].dbo.PickupCustomerAddress
+DELETE FROM [FitsExpress_DispatchMgmtDB].dbo.PickupCustomer
+
+SET IDENTITY_INSERT [FitsExpress_DispatchMgmtDB].dbo.PickupCustomer ON
+
+INSERT INTO [FitsExpress_DispatchMgmtDB].dbo.PickupCustomer(CustomerId,CustomerName,OldAccountNo,CreatedBy,CreatedDate,ModifiedBy,ModifiedDate,RecStatus)
+SELECT DISTINCT F3.NewCustomerId,F3.CustomerName,CU.ACCOUNT_NO,CU.CREATED_BY,CU.CREATED_DATE,CU.MODIFIED_BY,CU.MODIFIED_DATE,CU.[STATUS]
+FROM #FINAL3 F3 INNER JOIN dbo.CUSTOMER CU
+ON F3.CustomerId=CU.CUSTOMER_ID
+
+SET IDENTITY_INSERT [FitsExpress_DispatchMgmtDB].dbo.PickupCustomer OFF
+
+
+SET IDENTITY_INSERT [FitsExpress_DispatchMgmtDB].dbo.PickupCustomerAddress ON
+
+INSERT INTO [FitsExpress_DispatchMgmtDB].dbo.PickupCustomerAddress(AddressId,CustomerId,Building,Street,City,Postal,Country,CreatedBy,CreatedDate,ModifiedBy,ModifiedDate,RecStatus)
+SELECT DISTINCT F3.AddressId,F3.NewCustomerId,F3.Building,F3.Street,F3.City,NULL,'LK',CU.CREATED_BY,CU.CREATED_DATE,10001,GETDATE(),CU.[STATUS]
+FROM #FINAL3 F3 INNER JOIN dbo.CUSTOMER CU
+ON F3.CustomerId=CU.CUSTOMER_ID
+
+SET IDENTITY_INSERT [FitsExpress_DispatchMgmtDB].dbo.PickupCustomerAddress OFF
+
+
+SET IDENTITY_INSERT [FitsExpress_DispatchMgmtDB].dbo.ShipmentPickup ON
+
+INSERT INTO  [FitsExpress_DispatchMgmtDB].dbo.ShipmentPickup(PickupId,CustomerId,AddressId,ContactPersId,PickupDate,PickupTimeFrom,PickupTimeTo,PaymentType,PaymentAmount,PackageType,PackageWeight,OldContacts,SpInstructions,CreatedBy,CreatedDate,ModifiedBy,ModifiedDate,RecRemarks,RecStatus)
+SELECT DISTINCT F3.PickupId,F3.NewCustomerId,F3.AddressId,NULL,CONVERT(date,F3.PICKUP_DATE),F3.PICKUP_FROM,F3.PICKUP_TO,F3.PAYMENT_TYPE,F3.AMOUNT,F3.PACKAGE_TYPE,F3.ACTUAL_WEIGHT,F3.Contacts,F3.SpInstructions,CASE WHEN F3.CREATED_BY IN (0) THEN 10001 ELSE F3.CREATED_BY END,F3.CREATED_DATE,CASE WHEN F3.MODIFIED_BY IN (0) THEN 10001 ELSE F3.MODIFIED_BY END,F3.MODIFIED_DATE,F3.REMARKS,F3.[STATUS] --to be removed after app users migrated again
+FROM #FINAL3 F3
+
+SET IDENTITY_INSERT [FitsExpress_DispatchMgmtDB].dbo.ShipmentPickup OFF
+
+SET IDENTITY_INSERT [FitsExpress_DispatchMgmtDB].dbo.ShipmentPickupCourier ON
+
+INSERT INTO [FitsExpress_DispatchMgmtDB].dbo.ShipmentPickupCourier(CourPickupId,PickupId,CourAgentId,Density,ExceptionId,CreatedBy,CreatedDate,ModifiedBy,ModifiedDate,RecRemarks,RecStatus)
+SELECT CP.[COURIER_PICK_ID]
+      ,CP.[PICKUP_ID]
+      ,CP.[CAGENT_ID]
+	  ,NULL
+      ,CP.[EXCEP_ID]
+      ,CP.[CREATED_BY]
+      ,CP.[CREATED_DATE]
+      ,CP.[MODIFIED_BY]
+      ,CP.[MODIFIED_DATE]
+      ,CP.[REMARKS]
+      ,CP.[STATUS]
+  FROM .[dbo].[CPICKUP_INFO] CP
+
+SET IDENTITY_INSERT [FitsExpress_DispatchMgmtDB].dbo.ShipmentPickupCourier OFF
+
+
+INSERT INTO [FitsExpress_DispatchMgmtDB].dbo.ShipmentPickupPackage(PickupId,TrackingNumber)
+SELECT [PICKUP_ID],[TRACKING_NO] FROM [dbo].[PICKUP_WAYBILL]
+
+SET IDENTITY_INSERT [FitsExpress_DispatchMgmtDB].dbo.ShipmentPickupSnapshot ON
+
+INSERT INTO [FitsExpress_DispatchMgmtDB].dbo.ShipmentPickupSnapshot(SnapshotId,PickupId,AtchmntData,RecStatus)
+SELECT [SNAPSHOT_ID],[PICKUP_ID],[SNAPSHOTS],[STATUS]
+FROM [dbo].[PICKUP_SNAPSHOT]
+
+SET IDENTITY_INSERT [FitsExpress_DispatchMgmtDB].dbo.ShipmentPickupSnapshot OFF
+--56804
